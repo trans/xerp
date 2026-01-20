@@ -23,7 +23,7 @@ module Xerp::Index
     # Default directories to ignore.
     DEFAULT_IGNORE_DIRS = Set{
       ".git", ".xerp", ".hg", ".svn",
-      "node_modules", "vendor", "deps",
+      "node_modules", "vendor", "deps", "lib",
       "target", "build", "dist", "out", "_build",
       "__pycache__", ".pytest_cache", ".mypy_cache",
       ".idea", ".vscode", ".vs",
@@ -82,6 +82,9 @@ module Xerp::Index
         next if @ignore_dirs.includes?(entry)
 
         full_path = File.join(dir, entry)
+
+        # Skip symlinks to avoid loops
+        next if File.symlink?(full_path)
 
         if File.directory?(full_path)
           scan_dir(full_path, &block)
