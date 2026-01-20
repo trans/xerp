@@ -3,17 +3,17 @@ module Xerp::Adapters
   struct BlockInfo
     getter kind : String           # "layout" | "heading" | "window"
     getter level : Int32           # nesting/heading level
-    getter start_line : Int32      # 1-indexed start line
-    getter end_line : Int32        # 1-indexed end line (inclusive)
+    getter line_start : Int32      # 1-indexed start line
+    getter line_end : Int32        # 1-indexed end line (inclusive)
     getter header_text : String?   # optional header/first line text
     getter parent_index : Int32?   # index into blocks array, nil for root
 
-    def initialize(@kind, @level, @start_line, @end_line,
+    def initialize(@kind, @level, @line_start, @line_end,
                    @header_text = nil, @parent_index = nil)
     end
 
     def line_count : Int32
-      end_line - start_line + 1
+      line_end - line_start + 1
     end
   end
 

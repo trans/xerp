@@ -38,10 +38,10 @@ module Xerp::CLI::HumanFormatter
       result << "] "
       result << r.file_path
       result << ":"
-      result << r.start_line
-      if r.start_line != r.end_line
+      result << r.line_start
+      if r.line_start != r.line_end
         result << "-"
-        result << r.end_line
+        result << r.line_end
       end
       result << "  (score: "
       result << sprintf("%.3f", r.score)

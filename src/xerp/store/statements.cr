@@ -136,9 +136,9 @@ module Xerp::Store
     # --- Blocks ---
 
     def self.insert_block(db : DB::Database, file_id : Int64, kind : String, level : Int32,
-                          start_line : Int32, end_line : Int32, header_text : String?,
+                          line_start : Int32, line_end : Int32, header_text : String?,
                           parent_block_id : Int64?) : Int64
-      db.exec(<<-SQL, file_id, kind, level, start_line, end_line, header_text, parent_block_id)
+      db.exec(<<-SQL, file_id, kind, level, line_start, line_end, header_text, parent_block_id)
         INSERT INTO blocks (file_id, kind, level, start_line, end_line, header_text, parent_block_id)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       SQL

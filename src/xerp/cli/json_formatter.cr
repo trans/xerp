@@ -90,8 +90,8 @@ module Xerp::CLI::JsonFormatter
       json.field "file_path", result.file_path
       json.field "file_type", result.file_type
       json.field "block_id", result.block_id
-      json.field "start_line", result.start_line
-      json.field "end_line", result.end_line
+      json.field "line_start", result.line_start
+      json.field "line_end", result.line_end
       json.field "score", result.score
       json.field "header_text", result.header_text if result.header_text
       json.field "snippet", result.snippet

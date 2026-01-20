@@ -18,8 +18,8 @@ module Xerp::Util
 
   # Generates a stable result ID from block location and content hash.
   # This ID remains stable as long as the block content doesn't change.
-  def self.hash_result(rel_path : String, start_line : Int32, end_line : Int32, content_hash : String) : String
-    data = "#{rel_path}:#{start_line}:#{end_line}:#{content_hash}"
+  def self.hash_result(rel_path : String, line_start : Int32, line_end : Int32, content_hash : String) : String
+    data = "#{rel_path}:#{line_start}:#{line_end}:#{content_hash}"
     sha256_hex(data)
   end
 end

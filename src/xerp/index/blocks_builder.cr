@@ -17,8 +17,8 @@ module Xerp::Index
           file_id: file_id,
           kind: block.kind,
           level: block.level,
-          start_line: block.start_line,
-          end_line: block.end_line,
+          line_start: block.line_start,
+          line_end: block.line_end,
           header_text: block.header_text,
           parent_block_id: nil  # Set later
         )

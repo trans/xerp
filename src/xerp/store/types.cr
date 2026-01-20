@@ -31,12 +31,12 @@ module Xerp::Store
     getter file_id : Int64
     getter kind : String
     getter level : Int32
-    getter start_line : Int32
-    getter end_line : Int32
+    getter line_start : Int32
+    getter line_end : Int32
     getter header_text : String?
     getter parent_block_id : Int64?
 
-    def initialize(@id, @file_id, @kind, @level, @start_line, @end_line, @header_text, @parent_block_id)
+    def initialize(@id, @file_id, @kind, @level, @line_start, @line_end, @header_text, @parent_block_id)
     end
   end
 

@@ -29,7 +29,7 @@ module Xerp::Query::Snippet
     end
 
     result = extract_content(file_lines, block, hit_lines, max_lines, context_lines)
-    SnippetResult.new(result[:content].strip, result[:start_line], nil)
+    SnippetResult.new(result[:content].strip, result[:line_start], nil)
   end
 
   # Extracts a snippet from a file for a given block and hit lines.
@@ -43,12 +43,12 @@ module Xerp::Query::Snippet
   end
 
   # Formats raw snippet content with line number prefixes for display.
-  def self.format_with_line_numbers(content : String, start_line : Int32) : String
+  def self.format_with_line_numbers(content : String, line_start : Int32) : String
     return "" if content.empty?
 
     result = String::Builder.new
     content.each_line.with_index do |line, idx|
-      line_num = start_line + idx
+      line_num = line_start + idx
       result << line_num.to_s.rjust(4)
       result << "│ "
       result << line
@@ -63,10 +63,10 @@ module Xerp::Query::Snippet
                                    block : Store::BlockRow,
                                    hit_lines : Array(Int32),
                                    max_lines : Int32,
-                                   context_lines : Int32) : NamedTuple(content: String, start_line: Int32)
+                                   context_lines : Int32) : NamedTuple(content: String, line_start: Int32)
 
-    block_start = block.start_line - 1  # 0-indexed
-    block_end = block.end_line - 1      # 0-indexed
+    block_start = block.line_start - 1  # 0-indexed
+    block_end = block.line_end - 1      # 0-indexed
     block_line_count = block_end - block_start + 1
 
     # If block is small enough, return entire block
@@ -88,7 +88,7 @@ module Xerp::Query::Snippet
   end
 
   # Extracts a range of lines as raw content (no line number prefixes).
-  private def self.extract_range_raw(lines : Array(String), start_idx : Int32, end_idx : Int32) : NamedTuple(content: String, start_line: Int32)
+  private def self.extract_range_raw(lines : Array(String), start_idx : Int32, end_idx : Int32) : NamedTuple(content: String, line_start: Int32)
     content_lines = [] of String
 
     (start_idx..end_idx).each do |idx|
@@ -96,7 +96,7 @@ module Xerp::Query::Snippet
       content_lines << lines[idx]
     end
 
-    {content: content_lines.join("\n"), start_line: start_idx + 1}
+    {content: content_lines.join("\n"), line_start: start_idx + 1}
   end
 
   # Finds the densest cluster of hit lines within constraints.
@@ -158,8 +158,8 @@ module Xerp::Query::Snippet
   # Extracts just the raw lines without formatting.
   def self.extract_raw(workspace_root : String,
                        rel_path : String,
-                       start_line : Int32,
-                       end_line : Int32) : String
+                       line_start : Int32,
+                       line_end : Int32) : String
     abs_path = File.join(workspace_root, rel_path)
     return "" unless File.exists?(abs_path)
 
@@ -169,8 +169,8 @@ module Xerp::Query::Snippet
       return ""
     end
 
-    start_idx = start_line - 1
-    end_idx = end_line - 1
+    start_idx = line_start - 1
+    end_idx = line_end - 1
 
     lines = (start_idx..end_idx).map do |idx|
       idx >= 0 && idx < file_lines.size ? file_lines[idx] : ""

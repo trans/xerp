@@ -24,7 +24,7 @@ module Xerp::Adapters
       blocks = [] of BlockInfo
       block_idx_by_line = Array(Int32).new(lines.size, -1)
 
-      # Stack entries: {indent_level, block_index, start_line}
+      # Stack entries: {indent_level, block_index, line_start}
       stack = [{-1, -1, 0}]  # sentinel
 
       lines.each_with_index do |line, idx|
@@ -44,13 +44,13 @@ module Xerp::Adapters
           # Close the block
           closed = stack.pop
           if closed[1] >= 0
-            # Update end_line for the closed block
+            # Update line_end for the closed block
             old_block = blocks[closed[1]]
             blocks[closed[1]] = BlockInfo.new(
               kind: old_block.kind,
               level: old_block.level,
-              start_line: old_block.start_line,
-              end_line: line_num - 1,
+              line_start: old_block.line_start,
+              line_end: line_num - 1,
               header_text: old_block.header_text,
               parent_index: old_block.parent_index
             )
@@ -66,8 +66,8 @@ module Xerp::Adapters
         blocks << BlockInfo.new(
           kind: "layout",
           level: level,
-          start_line: line_num,
-          end_line: lines.size,  # will be updated when closed
+          line_start: line_num,
+          line_end: lines.size,  # will be updated when closed
           header_text: header,
           parent_index: parent_idx
         )
@@ -84,8 +84,8 @@ module Xerp::Adapters
           blocks[closed[1]] = BlockInfo.new(
             kind: old_block.kind,
             level: old_block.level,
-            start_line: old_block.start_line,
-            end_line: lines.size,
+            line_start: old_block.line_start,
+            line_end: lines.size,
             header_text: old_block.header_text,
             parent_index: old_block.parent_index
           )
@@ -107,8 +107,8 @@ module Xerp::Adapters
         blocks << BlockInfo.new(
           kind: "layout",
           level: 0,
-          start_line: 1,
-          end_line: lines.size,
+          line_start: 1,
+          line_end: lines.size,
           header_text: extract_header(lines.first? || "")
         )
         block_idx_by_line.fill(0)

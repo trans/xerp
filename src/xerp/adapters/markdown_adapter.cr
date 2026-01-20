@@ -39,13 +39,13 @@ module Xerp::Adapters
         while stack.size > 1 && stack.last[0] >= level
           closed = stack.pop
           if closed[1] >= 0
-            # Update end_line
+            # Update line_end
             old_block = blocks[closed[1]]
             blocks[closed[1]] = BlockInfo.new(
               kind: old_block.kind,
               level: old_block.level,
-              start_line: old_block.start_line,
-              end_line: line_num - 1,
+              line_start: old_block.line_start,
+              line_end: line_num - 1,
               header_text: old_block.header_text,
               parent_index: old_block.parent_index
             )
@@ -53,7 +53,7 @@ module Xerp::Adapters
         end
 
         # Determine end line (next heading or end of file)
-        end_line = if heading_idx + 1 < headings.size
+        line_end = if heading_idx + 1 < headings.size
                      headings[heading_idx + 1][0] - 1
                    else
                      lines.size
@@ -67,8 +67,8 @@ module Xerp::Adapters
         blocks << BlockInfo.new(
           kind: "heading",
           level: level,
-          start_line: line_num,
-          end_line: end_line,
+          line_start: line_num,
+          line_end: line_end,
           header_text: text,
           parent_index: parent_idx
         )
@@ -76,7 +76,7 @@ module Xerp::Adapters
         stack << {level, block_idx}
 
         # Map lines to this block
-        (line_num..end_line).each do |ln|
+        (line_num..line_end).each do |ln|
           idx = ln - 1
           block_idx_by_line[idx] = block_idx if idx < block_idx_by_line.size
         end
@@ -91,8 +91,8 @@ module Xerp::Adapters
         preamble = BlockInfo.new(
           kind: "heading",
           level: 0,
-          start_line: 1,
-          end_line: first_heading_line - 1,
+          line_start: 1,
+          line_end: first_heading_line - 1,
           header_text: preamble_header
         )
 
@@ -110,8 +110,8 @@ module Xerp::Adapters
             BlockInfo.new(
               kind: block.kind,
               level: block.level,
-              start_line: block.start_line,
-              end_line: block.end_line,
+              line_start: block.line_start,
+              line_end: block.line_end,
               header_text: block.header_text,
               parent_index: new_parent
             )
@@ -136,8 +136,8 @@ module Xerp::Adapters
       block = BlockInfo.new(
         kind: "heading",
         level: 0,
-        start_line: 1,
-        end_line: lines.size,
+        line_start: 1,
+        line_end: lines.size,
         header_text: header
       )
       block_idx_by_line = Array(Int32).new(lines.size, 0)

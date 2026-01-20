@@ -30,8 +30,8 @@ module Xerp::Adapters
         blocks << BlockInfo.new(
           kind: "window",
           level: 0,
-          start_line: 1,
-          end_line: lines.size,
+          line_start: 1,
+          line_end: lines.size,
           header_text: header
         )
         # All lines map to block 0
@@ -42,15 +42,15 @@ module Xerp::Adapters
 
         pos = 0
         while pos < lines.size
-          start_line = pos + 1  # 1-indexed
-          end_line = Math.min(pos + @window_size, lines.size)
+          line_start = pos + 1  # 1-indexed
+          line_end = Math.min(pos + @window_size, lines.size)
 
-          header = find_first_non_empty(lines[pos, end_line - pos])
+          header = find_first_non_empty(lines[pos, line_end - pos])
           blocks << BlockInfo.new(
             kind: "window",
             level: 0,
-            start_line: start_line,
-            end_line: end_line,
+            line_start: line_start,
+            line_end: line_end,
             header_text: header
           )
 
@@ -62,7 +62,7 @@ module Xerp::Adapters
         lines.size.times do |idx|
           line_num = idx + 1
           blocks.each_with_index do |block, block_idx|
-            if line_num >= block.start_line && line_num <= block.end_line
+            if line_num >= block.line_start && line_num <= block.line_end
               block_idx_by_line[idx] = block_idx
             end
           end

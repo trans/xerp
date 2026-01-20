@@ -37,8 +37,8 @@ module Xerp::Query
     getter file_path : String
     getter file_type : String
     getter block_id : Int64
-    getter start_line : Int32
-    getter end_line : Int32
+    getter line_start : Int32
+    getter line_end : Int32
     getter score : Float64
     getter snippet : String
     getter snippet_start : Int32
@@ -51,8 +51,8 @@ module Xerp::Query
       @file_path,
       @file_type,
       @block_id,
-      @start_line,
-      @end_line,
+      @line_start,
+      @line_end,
       @score,
       @snippet,
       @snippet_start,
@@ -63,7 +63,7 @@ module Xerp::Query
     end
 
     def line_count : Int32
-      end_line - start_line + 1
+      line_end - line_start + 1
     end
   end
 
