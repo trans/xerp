@@ -41,6 +41,7 @@ module Xerp::Query
     getter end_line : Int32
     getter score : Float64
     getter snippet : String
+    getter snippet_start : Int32
     getter header_text : String?
     getter hits : Array(HitInfo)?
     getter warn : String?
@@ -54,6 +55,7 @@ module Xerp::Query
       @end_line,
       @score,
       @snippet,
+      @snippet_start,
       @header_text = nil,
       @hits = nil,
       @warn = nil

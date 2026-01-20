@@ -7,18 +7,11 @@ module Xerp::CLI::GrepFormatter
     lines = [] of String
 
     response.results.each do |result|
-      # Parse snippet to extract individual lines
-      # Snippet format is: "  NN| content\n"
-      result.snippet.each_line do |snippet_line|
-        # Skip empty lines
-        next if snippet_line.strip.empty?
+      next if result.snippet.empty?
 
-        # Parse the line number prefix: "  NN| content"
-        if match = snippet_line.match(/^\s*(\d+)[│|]\s?(.*)$/)
-          line_num = match[1]
-          content = match[2]
-          lines << "#{result.file_path}:#{line_num}: #{content}"
-        end
+      result.snippet.each_line.with_index do |line, idx|
+        line_num = result.snippet_start + idx
+        lines << "#{result.file_path}:#{line_num}: #{line}"
       end
     end
 

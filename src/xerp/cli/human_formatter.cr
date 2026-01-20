@@ -1,4 +1,5 @@
 require "../query/types"
+require "../query/snippet"
 require "../index/indexer"
 
 module Xerp::CLI::HumanFormatter
@@ -64,7 +65,7 @@ module Xerp::CLI::HumanFormatter
         result << warn
         result << "]\n"
       elsif !r.snippet.empty?
-        result << r.snippet
+        result << Query::Snippet.format_with_line_numbers(r.snippet, r.snippet_start)
         result << "\n"
       end
 

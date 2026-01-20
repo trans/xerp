@@ -5,7 +5,10 @@ module Xerp::Query::Snippet
   MAX_SNIPPET_LINES = 50
 
   # Result of snippet extraction.
-  record SnippetResult, content : String, error : String?
+  # - content: raw lines joined by newlines (no line number prefixes)
+  # - snippet_start: 1-indexed line number where snippet starts
+  # - error: error message if extraction failed
+  record SnippetResult, content : String, snippet_start : Int32, error : String?
 
   # Extracts a snippet with error reporting.
   def self.extract_with_error(workspace_root : String,
@@ -16,17 +19,17 @@ module Xerp::Query::Snippet
                               context_lines : Int32 = 3) : SnippetResult
     abs_path = File.join(workspace_root, rel_path)
     unless File.exists?(abs_path)
-      return SnippetResult.new("", "file not found")
+      return SnippetResult.new("", 0, "file not found")
     end
 
     begin
       file_lines = File.read_lines(abs_path)
     rescue ex
-      return SnippetResult.new("", "read error")
+      return SnippetResult.new("", 0, "read error")
     end
 
-    content = extract_content(file_lines, block, hit_lines, max_lines, context_lines)
-    SnippetResult.new(content, nil)
+    result = extract_content(file_lines, block, hit_lines, max_lines, context_lines)
+    SnippetResult.new(result[:content], result[:start_line], nil)
   end
 
   # Extracts a snippet from a file for a given block and hit lines.
@@ -39,12 +42,28 @@ module Xerp::Query::Snippet
     extract_with_error(workspace_root, rel_path, block, hit_lines, max_lines, context_lines).content
   end
 
+  # Formats raw snippet content with line number prefixes for display.
+  def self.format_with_line_numbers(content : String, start_line : Int32) : String
+    return "" if content.empty?
+
+    result = String::Builder.new
+    content.each_line.with_index do |line, idx|
+      line_num = start_line + idx
+      result << line_num.to_s.rjust(4)
+      result << "│ "
+      result << line
+      result << "\n"
+    end
+    result.to_s.chomp
+  end
+
   # Internal: extracts snippet content from file lines.
+  # Returns raw content and the 1-indexed start line.
   private def self.extract_content(file_lines : Array(String),
                                    block : Store::BlockRow,
                                    hit_lines : Array(Int32),
                                    max_lines : Int32,
-                                   context_lines : Int32) : String
+                                   context_lines : Int32) : NamedTuple(content: String, start_line: Int32)
 
     block_start = block.start_line - 1  # 0-indexed
     block_end = block.end_line - 1      # 0-indexed
@@ -52,36 +71,32 @@ module Xerp::Query::Snippet
 
     # If block is small enough, return entire block
     if block_line_count <= max_lines
-      return extract_range(file_lines, block_start, block_end)
+      return extract_range_raw(file_lines, block_start, block_end)
     end
 
     # Block is too large - find the best region around hits
     if hit_lines.empty?
       # No hits - return beginning of block
       end_idx = Math.min(block_start + max_lines - 1, block_end)
-      return extract_range(file_lines, block_start, end_idx)
+      return extract_range_raw(file_lines, block_start, end_idx)
     end
 
     # Find densest cluster of hits
     cluster = find_densest_cluster(hit_lines, block_start, block_end, max_lines, context_lines)
 
-    extract_range(file_lines, cluster[:start], cluster[:end])
+    extract_range_raw(file_lines, cluster[:start], cluster[:end])
   end
 
-  # Extracts a range of lines with line number prefixes.
-  private def self.extract_range(lines : Array(String), start_idx : Int32, end_idx : Int32) : String
-    result = String::Builder.new
+  # Extracts a range of lines as raw content (no line number prefixes).
+  private def self.extract_range_raw(lines : Array(String), start_idx : Int32, end_idx : Int32) : NamedTuple(content: String, start_line: Int32)
+    content_lines = [] of String
 
     (start_idx..end_idx).each do |idx|
       next if idx < 0 || idx >= lines.size
-      line_num = idx + 1
-      result << line_num.to_s.rjust(4)
-      result << "│ "
-      result << lines[idx]
-      result << "\n"
+      content_lines << lines[idx]
     end
 
-    result.to_s.chomp
+    {content: content_lines.join("\n"), start_line: start_idx + 1}
   end
 
   # Finds the densest cluster of hit lines within constraints.

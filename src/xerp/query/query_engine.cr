@@ -133,6 +133,7 @@ module Xerp::Query
           end_line: block_row.end_line,
           score: bs.score,
           snippet: snippet_result.content,
+          snippet_start: snippet_result.snippet_start,
           header_text: block_row.header_text,
           hits: hits,
           warn: snippet_result.error
