@@ -95,6 +95,7 @@ module Xerp::CLI::JsonFormatter
       json.field "score", result.score
       json.field "header_text", result.header_text if result.header_text
       json.field "snippet", result.snippet
+      json.field "warn", result.warn if result.warn
 
       if hits = result.hits
         json.field "hits" do

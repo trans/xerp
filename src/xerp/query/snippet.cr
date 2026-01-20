@@ -4,6 +4,31 @@ module Xerp::Query::Snippet
   # Maximum snippet size in lines.
   MAX_SNIPPET_LINES = 50
 
+  # Result of snippet extraction.
+  record SnippetResult, content : String, error : String?
+
+  # Extracts a snippet with error reporting.
+  def self.extract_with_error(workspace_root : String,
+                              rel_path : String,
+                              block : Store::BlockRow,
+                              hit_lines : Array(Int32),
+                              max_lines : Int32 = MAX_SNIPPET_LINES,
+                              context_lines : Int32 = 3) : SnippetResult
+    abs_path = File.join(workspace_root, rel_path)
+    unless File.exists?(abs_path)
+      return SnippetResult.new("", "file not found")
+    end
+
+    begin
+      file_lines = File.read_lines(abs_path)
+    rescue ex
+      return SnippetResult.new("", "read error")
+    end
+
+    content = extract_content(file_lines, block, hit_lines, max_lines, context_lines)
+    SnippetResult.new(content, nil)
+  end
+
   # Extracts a snippet from a file for a given block and hit lines.
   def self.extract(workspace_root : String,
                    rel_path : String,
@@ -11,14 +36,15 @@ module Xerp::Query::Snippet
                    hit_lines : Array(Int32),
                    max_lines : Int32 = MAX_SNIPPET_LINES,
                    context_lines : Int32 = 3) : String
-    abs_path = File.join(workspace_root, rel_path)
-    return "" unless File.exists?(abs_path)
+    extract_with_error(workspace_root, rel_path, block, hit_lines, max_lines, context_lines).content
+  end
 
-    begin
-      file_lines = File.read_lines(abs_path)
-    rescue
-      return ""
-    end
+  # Internal: extracts snippet content from file lines.
+  private def self.extract_content(file_lines : Array(String),
+                                   block : Store::BlockRow,
+                                   hit_lines : Array(Int32),
+                                   max_lines : Int32,
+                                   context_lines : Int32) : String
 
     block_start = block.start_line - 1  # 0-indexed
     block_end = block.end_line - 1      # 0-indexed

@@ -43,6 +43,7 @@ module Xerp::Query
     getter snippet : String
     getter header_text : String?
     getter hits : Array(HitInfo)?
+    getter warn : String?
 
     def initialize(
       @result_id,
@@ -54,7 +55,8 @@ module Xerp::Query
       @score,
       @snippet,
       @header_text = nil,
-      @hits = nil
+      @hits = nil,
+      @warn = nil
     )
     end
 

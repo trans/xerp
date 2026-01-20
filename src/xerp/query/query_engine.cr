@@ -109,7 +109,7 @@ module Xerp::Query
         hit_lines = Explain.all_hit_lines(bs)
 
         # Extract snippet
-        snippet = Snippet.extract(
+        snippet_result = Snippet.extract_with_error(
           @config.workspace_root,
           file_row.rel_path,
           block_row,
@@ -132,9 +132,10 @@ module Xerp::Query
           start_line: block_row.start_line,
           end_line: block_row.end_line,
           score: bs.score,
-          snippet: snippet,
+          snippet: snippet_result.content,
           header_text: block_row.header_text,
-          hits: hits
+          hits: hits,
+          warn: snippet_result.error
         )
       end
 

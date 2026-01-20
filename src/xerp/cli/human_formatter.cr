@@ -58,9 +58,15 @@ module Xerp::CLI::HumanFormatter
       result << SEPARATOR
       result << "\n"
 
-      # Snippet
-      result << r.snippet
-      result << "\n"
+      # Snippet or warning
+      if warn = r.warn
+        result << "    [warning: "
+        result << warn
+        result << "]\n"
+      elsif !r.snippet.empty?
+        result << r.snippet
+        result << "\n"
+      end
 
       # Explain mode: show hits
       if explain && (hits = r.hits)
