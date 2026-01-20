@@ -29,7 +29,7 @@ module Xerp::Query::Snippet
     end
 
     result = extract_content(file_lines, block, hit_lines, max_lines, context_lines)
-    SnippetResult.new(result[:content], result[:start_line], nil)
+    SnippetResult.new(result[:content].strip, result[:start_line], nil)
   end
 
   # Extracts a snippet from a file for a given block and hit lines.
