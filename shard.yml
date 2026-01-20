@@ -1,0 +1,17 @@
+name: xerp
+version: 0.1.0
+
+authors:
+  - Thomas Sawyer <transfire@gmail.com>
+
+targets:
+  xerp:
+    main: src/xerp.cr
+
+crystal: '>= 1.18.2'
+
+license: MIT
+
+dependencies:
+  sqlite3:
+    github: crystal-lang/crystal-sqlite3
