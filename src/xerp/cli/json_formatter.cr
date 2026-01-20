@@ -3,9 +3,9 @@ require "../query/types"
 require "../index/indexer"
 
 module Xerp::CLI::JsonFormatter
-  # Formats a query response as JSON.
+  # Formats a query response as JSON (pretty-printed).
   def self.format_query_response(response : Query::QueryResponse) : String
-    JSON.build do |json|
+    JSON.build(indent: "  ") do |json|
       json.object do
         json.field "query", response.query
         json.field "query_hash", response.query_hash
@@ -58,9 +58,9 @@ module Xerp::CLI::JsonFormatter
     lines.join("\n")
   end
 
-  # Formats index stats as JSON.
+  # Formats index stats as JSON (pretty-printed).
   def self.format_index_stats(stats : Index::IndexStats, workspace_root : String) : String
-    JSON.build do |json|
+    JSON.build(indent: "  ") do |json|
       json.object do
         json.field "workspace", workspace_root
         json.field "files_indexed", stats.files_indexed
@@ -72,9 +72,9 @@ module Xerp::CLI::JsonFormatter
     end
   end
 
-  # Formats a mark acknowledgment as JSON.
+  # Formats a mark acknowledgment as JSON (pretty-printed).
   def self.format_mark_ack(result_id : String, kind : String, event_id : Int64) : String
-    JSON.build do |json|
+    JSON.build(indent: "  ") do |json|
       json.object do
         json.field "result_id", result_id
         json.field "kind", kind
