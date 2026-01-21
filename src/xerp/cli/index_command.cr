@@ -1,4 +1,4 @@
-require "option_parser"
+require "clj"
 require "../config"
 require "../index/indexer"
 require "./json_formatter"
@@ -6,44 +6,11 @@ require "./human_formatter"
 
 module Xerp::CLI
   module IndexCommand
-    def self.run(args : Array(String)) : Int32
-      root = Dir.current
-      rebuild = false
-      json_output = false
-      show_help = false
-
-      parser = OptionParser.new do |p|
-        p.banner = "Usage: xerp index [OPTIONS]"
-
-        p.on("--root PATH", "Workspace root (default: current directory)") do |path|
-          root = File.expand_path(path)
-        end
-
-        p.on("--rebuild", "Force full reindex") do
-          rebuild = true
-        end
-
-        p.on("--json", "Output stats as JSON") do
-          json_output = true
-        end
-
-        p.on("-h", "--help", "Show this help") do
-          show_help = true
-        end
-      end
-
-      begin
-        parser.parse(args)
-      rescue ex : OptionParser::InvalidOption
-        STDERR.puts "Error: #{ex.message}"
-        STDERR.puts parser
-        return 1
-      end
-
-      if show_help
-        puts parser
-        return 0
-      end
+    def self.run(result : CLJ::Result) : Int32
+      root = result["root"]?.try(&.as_s) || Dir.current
+      root = File.expand_path(root)
+      rebuild = result["rebuild"]?.try(&.as_bool) || false
+      json_output = result["json"]?.try(&.as_bool) || false
 
       # Validate root exists
       unless Dir.exists?(root)
