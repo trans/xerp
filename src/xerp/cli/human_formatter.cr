@@ -7,7 +7,7 @@ module Xerp::CLI::HumanFormatter
   SEPARATOR = "━" * 78
 
   # Formats a query response for human reading.
-  def self.format_query_response(response : Query::QueryResponse, explain : Bool = false) : String
+  def self.format_query_response(response : Query::QueryResponse, explain : Bool = false, ancestry : Bool = false) : String
     result = String::Builder.new
 
     # Header line
@@ -48,8 +48,13 @@ module Xerp::CLI::HumanFormatter
       result << ")"
       result << "\n"
 
-      # Header text if present
-      if header = r.header_text
+      # Ancestry chain if requested and present
+      if ancestry && (chain = r.ancestry) && !chain.empty?
+        result << "    "
+        result << chain.map { |h| truncate(h, 30) }.join(" > ")
+        result << "\n"
+      # Header text if present (only show if not showing ancestry)
+      elsif header = r.header_text
         result << "    "
         result << truncate(header, 70)
         result << "\n"

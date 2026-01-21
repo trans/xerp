@@ -124,6 +124,9 @@ module Xerp::Query
         # Build hits if explaining
         hits = opts.explain ? Explain.build_hits(bs) : nil
 
+        # Build ancestry chain if requested
+        ancestry = opts.ancestry ? build_ancestry(db, block_row) : nil
+
         results << QueryResult.new(
           result_id: result_id,
           file_path: file_row.rel_path,
@@ -136,11 +139,32 @@ module Xerp::Query
           snippet_start: snippet_result.snippet_start,
           header_text: block_row.header_text,
           hits: hits,
-          warn: snippet_result.error
+          warn: snippet_result.error,
+          ancestry: ancestry
         )
       end
 
       results
+    end
+
+    # Builds the ancestry chain from root to the block's parent.
+    # Returns headers from outermost ancestor to immediate parent.
+    private def build_ancestry(db : DB::Database, block : Store::BlockRow) : Array(String)
+      ancestors = [] of String
+
+      current_id = block.parent_block_id
+      while current_id
+        parent = Store::Statements.select_block_by_id(db, current_id)
+        break unless parent
+
+        if header = parent.header_text
+          ancestors.unshift(header)  # Add to front (outermost first)
+        end
+
+        current_id = parent.parent_block_id
+      end
+
+      ancestors
     end
 
     # Convenience method for simple queries.

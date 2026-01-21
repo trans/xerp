@@ -3,6 +3,7 @@ module Xerp::Query
   struct QueryOptions
     getter top_k : Int32
     getter explain : Bool
+    getter ancestry : Bool
     getter file_filter : Regex?
     getter file_type_filter : String?
     getter max_snippet_lines : Int32
@@ -11,6 +12,7 @@ module Xerp::Query
     def initialize(
       @top_k : Int32 = 20,
       @explain : Bool = false,
+      @ancestry : Bool = false,
       @file_filter : Regex? = nil,
       @file_type_filter : String? = nil,
       @max_snippet_lines : Int32 = 24,
@@ -45,6 +47,7 @@ module Xerp::Query
     getter header_text : String?
     getter hits : Array(HitInfo)?
     getter warn : String?
+    getter ancestry : Array(String)?
 
     def initialize(
       @result_id,
@@ -58,7 +61,8 @@ module Xerp::Query
       @snippet_start,
       @header_text = nil,
       @hits = nil,
-      @warn = nil
+      @warn = nil,
+      @ancestry = nil
     )
     end
 
