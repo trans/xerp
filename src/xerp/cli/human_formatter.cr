@@ -3,9 +3,6 @@ require "../query/snippet"
 require "../index/indexer"
 
 module Xerp::CLI::HumanFormatter
-  # Separator bar for visual block boundaries.
-  SEPARATOR = "━" * 78
-
   # Formats a query response for human reading.
   def self.format_query_response(response : Query::QueryResponse, explain : Bool = false, ancestry : Bool = false) : String
     result = String::Builder.new
@@ -28,10 +25,6 @@ module Xerp::CLI::HumanFormatter
     result << "\n"
 
     response.results.each_with_index do |r, idx|
-      # Block separator
-      result << SEPARATOR
-      result << "\n"
-
       # Result header: [N] path:lines (score: X.XXX)
       result << "["
       result << (idx + 1)
@@ -60,11 +53,7 @@ module Xerp::CLI::HumanFormatter
         result << "\n"
       end
 
-      # Separator before snippet
-      result << SEPARATOR
-      result << "\n"
-
-      # Snippet or warning
+      # Snippet
       if warn = r.warn
         result << "    [warning: "
         result << warn
