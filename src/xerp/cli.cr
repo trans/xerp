@@ -147,6 +147,7 @@ module Xerp::CLI
     cli.subcommand("query", QUERY_SCHEMA)
     cli.subcommand("q", QUERY_SCHEMA)  # alias
     cli.subcommand("mark", MARK_SCHEMA)
+    cli.default_subcommand("query")
 
     result = cli.parse(args)
 
