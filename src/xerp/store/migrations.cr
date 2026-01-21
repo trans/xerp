@@ -2,7 +2,7 @@ require "sqlite3"
 
 module Xerp::Store
   module Migrations
-    CURRENT_VERSION = 1
+    CURRENT_VERSION = 2
 
     # Runs all pending migrations on the database.
     def self.migrate!(db : DB::Database) : Nil
@@ -30,6 +30,7 @@ module Xerp::Store
     def self.apply_migration(db : DB::Database, version : Int32) : Nil
       case version
       when 1 then migrate_v1(db)
+      when 2 then migrate_v2(db)
       else        raise "Unknown migration version: #{version}"
       end
     end
@@ -145,6 +146,21 @@ module Xerp::Store
           trained_at TEXT NOT NULL
         )
       SQL
+    end
+
+    # Migration v2: Add line_cache table
+    private def self.migrate_v2(db : DB::Database) : Nil
+      db.exec <<-SQL
+        CREATE TABLE IF NOT EXISTS line_cache (
+          file_id  INTEGER NOT NULL REFERENCES files(file_id) ON DELETE CASCADE,
+          line_num INTEGER NOT NULL,
+          text     TEXT NOT NULL,
+          PRIMARY KEY (file_id, line_num)
+        )
+      SQL
+
+      # Note: We leave header_text in blocks table for now (SQLite doesn't support DROP COLUMN easily)
+      # It will just be unused - block start lines are now in line_cache
     end
   end
 end

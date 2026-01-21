@@ -291,6 +291,39 @@ module Xerp::Store
       results
     end
 
+    # --- Line Cache ---
+
+    def self.upsert_line_cache(db : DB::Database, file_id : Int64, line_num : Int32, text : String) : Nil
+      db.exec(<<-SQL, file_id, line_num, text)
+        INSERT INTO line_cache (file_id, line_num, text) VALUES (?, ?, ?)
+        ON CONFLICT(file_id, line_num) DO UPDATE SET text = excluded.text
+      SQL
+    end
+
+    def self.select_line_from_cache(db : DB::Database, file_id : Int64, line_num : Int32) : String?
+      db.query_one?("SELECT text FROM line_cache WHERE file_id = ? AND line_num = ?", file_id, line_num, as: String)
+    end
+
+    def self.delete_lines_by_file(db : DB::Database, file_id : Int64) : Nil
+      db.exec("DELETE FROM line_cache WHERE file_id = ?", file_id)
+    end
+
+    # Selects a block with its header text from line_cache via join.
+    def self.select_block_with_header(db : DB::Database, block_id : Int64) : {BlockRow, String?}?
+      result = db.query_one?(<<-SQL, block_id, as: {Int64, Int64, String, Int32, Int32, Int32, String?, Int64?, String?})
+        SELECT b.block_id, b.file_id, b.kind, b.level, b.start_line, b.end_line,
+               b.header_text, b.parent_block_id, lc.text
+        FROM blocks b
+        LEFT JOIN line_cache lc ON b.file_id = lc.file_id AND b.start_line = lc.line_num
+        WHERE b.block_id = ?
+      SQL
+      return nil unless result
+
+      block = BlockRow.new(result[0], result[1], result[2], result[3], result[4], result[5], result[6], result[7])
+      header = result[8]  # from line_cache
+      {block, header}
+    end
+
     # --- Utility ---
 
     def self.file_count(db : DB::Database) : Int64

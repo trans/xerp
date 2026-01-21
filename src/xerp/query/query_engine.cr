@@ -124,8 +124,11 @@ module Xerp::Query
         # Build hits if explaining
         hits = opts.explain ? Explain.build_hits(bs) : nil
 
-        # Build ancestry chain if requested
-        ancestry = opts.ancestry ? build_ancestry(db, block_row) : nil
+        # Build ancestry chain if requested (also gives us the header)
+        ancestry = build_ancestry(db, file_row.id, block_row) if opts.ancestry
+
+        # Get header from immediate parent via line_cache
+        header_text = get_parent_header(db, file_row.id, block_row)
 
         results << QueryResult.new(
           result_id: result_id,
@@ -137,7 +140,7 @@ module Xerp::Query
           score: bs.score,
           snippet: snippet_result.content,
           snippet_start: snippet_result.snippet_start,
-          header_text: block_row.header_text,
+          header_text: header_text,
           hits: hits,
           warn: snippet_result.error,
           ancestry: ancestry
@@ -147,9 +150,20 @@ module Xerp::Query
       results
     end
 
+    # Gets the header text from the immediate parent block via line_cache.
+    private def get_parent_header(db : DB::Database, file_id : Int64, block : Store::BlockRow) : String?
+      parent_id = block.parent_block_id
+      return nil unless parent_id
+
+      parent = Store::Statements.select_block_by_id(db, parent_id)
+      return nil unless parent
+
+      Store::Statements.select_line_from_cache(db, file_id, parent.line_start)
+    end
+
     # Builds the ancestry chain from root to the block's parent.
     # Returns headers from outermost ancestor to immediate parent.
-    private def build_ancestry(db : DB::Database, block : Store::BlockRow) : Array(String)
+    private def build_ancestry(db : DB::Database, file_id : Int64, block : Store::BlockRow) : Array(String)
       ancestors = [] of String
 
       current_id = block.parent_block_id
@@ -157,7 +171,8 @@ module Xerp::Query
         parent = Store::Statements.select_block_by_id(db, current_id)
         break unless parent
 
-        if header = parent.header_text
+        # Get header from line_cache
+        if header = Store::Statements.select_line_from_cache(db, file_id, parent.line_start)
           ancestors.unshift(header)  # Add to front (outermost first)
         end
 
