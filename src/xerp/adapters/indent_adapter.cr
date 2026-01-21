@@ -7,7 +7,8 @@ module Xerp::Adapters
     @tab_width : Int32
     @file_type_str : String
 
-    def initialize(@tab_width : Int32 = 4, @file_type_str : String = "code")
+    def initialize(@tab_width : Int32 = 0, @file_type_str : String = "code")
+      # tab_width=0 means auto-detect
     end
 
     def file_type : String
@@ -17,8 +18,11 @@ module Xerp::Adapters
     def build_blocks(lines : Array(String)) : AdapterResult
       return empty_result if lines.empty?
 
+      # Auto-detect indent width if not specified
+      effective_tab_width = @tab_width > 0 ? @tab_width : detect_indent_width(lines)
+
       # Calculate indent level for each line
-      indent_levels = lines.map { |line| indent_level(line) }
+      indent_levels = lines.map { |line| indent_level(line, effective_tab_width) }
 
       # Build blocks using stack-based algorithm
       blocks = [] of BlockInfo
@@ -123,19 +127,64 @@ module Xerp::Adapters
 
     # Calculates the indentation level of a line.
     # Returns -1 for blank lines.
-    private def indent_level(line : String) : Int32
+    private def indent_level(line : String, tab_width : Int32) : Int32
       return -1 if line.strip.empty?
 
       spaces = 0
       line.each_char do |ch|
         case ch
         when ' '  then spaces += 1
-        when '\t' then spaces += @tab_width
+        when '\t' then spaces += tab_width
         else           break
         end
       end
 
-      spaces // @tab_width
+      spaces // tab_width
+    end
+
+    # Detects the indent width used in the file.
+    # Returns the most common indent increment, defaulting to 2.
+    private def detect_indent_width(lines : Array(String)) : Int32
+      # Count leading spaces for each non-blank line
+      indents = lines.compact_map do |line|
+        next nil if line.strip.empty?
+        count_leading_spaces(line)
+      end
+
+      return 2 if indents.size < 2
+
+      # Find the most common non-zero difference between consecutive indent levels
+      diffs = Hash(Int32, Int32).new(0)
+      prev_indent = 0
+
+      indents.each do |indent|
+        diff = (indent - prev_indent).abs
+        diffs[diff] += 1 if diff > 0 && diff <= 8
+        prev_indent = indent
+      end
+
+      # Also check the minimum non-zero indent as a signal
+      min_indent = indents.reject(&.zero?).min?
+      diffs[min_indent] += 2 if min_indent && min_indent > 0 && min_indent <= 8
+
+      return 2 if diffs.empty?
+
+      # Return the most common small difference (prefer 2 over 4 if tied)
+      best = diffs.max_by { |diff, count| {count, -diff} }
+      best[0].clamp(1, 8)
+    end
+
+    # Counts leading spaces (tabs count as spaces based on position).
+    private def count_leading_spaces(line : String) : Int32
+      spaces = 0
+      line.each_char do |ch|
+        case ch
+        when ' '  then spaces += 1
+        when '\t' then spaces += (8 - spaces % 8)  # Tab to next 8-column stop
+        else           break
+        end
+      end
+      spaces
     end
   end
 end

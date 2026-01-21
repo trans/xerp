@@ -7,7 +7,7 @@ module Xerp
     property db_path : String
 
     # Tokenization settings
-    property tab_width : Int32 = 4
+    property tab_width : Int32 = 0  # 0 = auto-detect per file
     property max_token_len : Int32 = 128
 
     # Query settings
