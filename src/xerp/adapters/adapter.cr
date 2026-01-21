@@ -42,11 +42,11 @@ module Xerp::Adapters
     # Lines are 0-indexed in the array.
     abstract def build_blocks(lines : Array(String)) : AdapterResult
 
-    # Extracts header text from a line (first non-whitespace content).
+    # Extracts header text from a line, preserving leading whitespace.
     protected def extract_header(line : String, max_len : Int32 = 80) : String?
-      stripped = line.strip
-      return nil if stripped.empty?
-      stripped.size > max_len ? stripped[0, max_len] : stripped
+      return nil if line.strip.empty?
+      trimmed = line.rstrip  # preserve leading whitespace, trim trailing
+      trimmed.size > max_len ? trimmed[0, max_len] : trimmed
     end
   end
 end

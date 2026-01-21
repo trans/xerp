@@ -162,9 +162,9 @@ module Xerp::Query
     end
 
     # Builds the ancestry chain from root to the block's parent.
-    # Returns headers from outermost ancestor to immediate parent.
-    private def build_ancestry(db : DB::Database, file_id : Int64, block : Store::BlockRow) : Array(String)
-      ancestors = [] of String
+    # Returns AncestorInfo from outermost ancestor to immediate parent.
+    private def build_ancestry(db : DB::Database, file_id : Int64, block : Store::BlockRow) : Array(AncestorInfo)
+      ancestors = [] of AncestorInfo
 
       current_id = block.parent_block_id
       while current_id
@@ -173,7 +173,7 @@ module Xerp::Query
 
         # Get header from line_cache
         if header = Store::Statements.select_line_from_cache(db, file_id, parent.line_start)
-          ancestors.unshift(header)  # Add to front (outermost first)
+          ancestors.unshift(AncestorInfo.new(parent.line_start, header))
         end
 
         current_id = parent.parent_block_id

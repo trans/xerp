@@ -12,7 +12,8 @@ module Xerp::CLI
       root = Dir.current
       top_k = 10
       explain = false
-      ancestry = false
+      ancestry = true
+      ellipsis = false
       json_output = false
       jsonl_output = false
       grep_output = false
@@ -38,8 +39,12 @@ module Xerp::CLI
           explain = true
         end
 
-        p.on("--ancestry", "Show block ancestry chain") do
-          ancestry = true
+        p.on("--no-ancestry", "Hide block ancestry chain") do
+          ancestry = false
+        end
+
+        p.on("--ellipsis", "Show ... between ancestry and snippet") do
+          ellipsis = true
         end
 
         p.on("--json", "Full JSON output") do
@@ -135,7 +140,7 @@ module Xerp::CLI
           output = GrepFormatter.format_query_response(response)
           puts output unless output.empty?
         else
-          puts HumanFormatter.format_query_response(response, explain: explain, ancestry: ancestry)
+          puts HumanFormatter.format_query_response(response, explain: explain, ancestry: ancestry, ellipsis: ellipsis)
         end
 
         # Exit code 2 if no results

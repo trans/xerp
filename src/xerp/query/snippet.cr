@@ -44,7 +44,7 @@ module Xerp::Query::Snippet
     end
 
     content = extract_multi_cluster(file_lines, block, hit_lines, max_lines, context_lines)
-    SnippetResult.new(content.strip, block.line_start, nil)
+    SnippetResult.new(content.rstrip, block.line_start, nil)
   end
 
   # Extracts a snippet from a file for a given block and hit lines.

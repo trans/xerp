@@ -12,7 +12,7 @@ module Xerp::Query
     def initialize(
       @top_k : Int32 = 20,
       @explain : Bool = false,
-      @ancestry : Bool = false,
+      @ancestry : Bool = true,
       @file_filter : Regex? = nil,
       @file_type_filter : String? = nil,
       @max_snippet_lines : Int32 = 24,
@@ -47,7 +47,7 @@ module Xerp::Query
     getter header_text : String?
     getter hits : Array(HitInfo)?
     getter warn : String?
-    getter ancestry : Array(String)?
+    getter ancestry : Array(AncestorInfo)?
 
     def initialize(
       @result_id,
@@ -68,6 +68,15 @@ module Xerp::Query
 
     def line_count : Int32
       line_end - line_start + 1
+    end
+  end
+
+  # Information about an ancestor block in the hierarchy.
+  struct AncestorInfo
+    getter line_num : Int32
+    getter text : String
+
+    def initialize(@line_num, @text)
     end
   end
 

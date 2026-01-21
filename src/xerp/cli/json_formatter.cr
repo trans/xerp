@@ -97,7 +97,18 @@ module Xerp::CLI::JsonFormatter
       json.field "snippet", result.snippet
       json.field "warn", result.warn if result.warn
       if ancestry = result.ancestry
-        json.field "ancestry", ancestry unless ancestry.empty?
+        unless ancestry.empty?
+          json.field "ancestry" do
+            json.array do
+              ancestry.each do |ancestor|
+                json.object do
+                  json.field "line_num", ancestor.line_num
+                  json.field "text", ancestor.text
+                end
+              end
+            end
+          end
+        end
       end
 
       if hits = result.hits

@@ -4,7 +4,7 @@ require "../index/indexer"
 
 module Xerp::CLI::HumanFormatter
   # Formats a query response for human reading.
-  def self.format_query_response(response : Query::QueryResponse, explain : Bool = false, ancestry : Bool = false) : String
+  def self.format_query_response(response : Query::QueryResponse, explain : Bool = false, ancestry : Bool = true, ellipsis : Bool = false) : String
     result = String::Builder.new
 
     # Header line
@@ -41,16 +41,31 @@ module Xerp::CLI::HumanFormatter
       result << ")"
       result << "\n"
 
-      # Ancestry chain if requested and present
+      # Ancestry chain if present - show each on its own line with line numbers
+      has_ancestry = false
       if ancestry && (chain = r.ancestry) && !chain.empty?
-        result << "    "
-        result << chain.map { |h| truncate(h, 30) }.join(" > ")
-        result << "\n"
+        has_ancestry = true
+        chain.each do |ancestor|
+          result << ancestor.line_num.to_s.rjust(4)
+          result << "│ "
+          result << ancestor.text
+          result << "\n"
+        end
       # Header text if present (only show if not showing ancestry)
       elsif header = r.header_text
         result << "    "
         result << truncate(header, 70)
         result << "\n"
+      end
+
+      # Add ellipsis between ancestry and snippet if requested
+      if ellipsis && has_ancestry && !r.snippet.empty?
+        # Get indentation from first line of snippet
+        first_line = r.snippet.lines.first? || ""
+        indent = first_line[/\A\s*/]
+        result << "    │ "
+        result << indent
+        result << "...\n"
       end
 
       # Snippet
