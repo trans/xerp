@@ -17,6 +17,8 @@ module Xerp::CLI
       grep_output = false
       file_filter : Regex? = nil
       file_type_filter : String? = nil
+      context_lines = 2
+      max_block_lines = 24
       query_text : String? = nil
       show_help = false
 
@@ -53,6 +55,14 @@ module Xerp::CLI
 
         p.on("--type TYPE", "Filter by file type (code/markdown/config/text)") do |t|
           file_type_filter = t
+        end
+
+        p.on("-C N", "--context N", "Lines of context before/after hits (default: 2)") do |n|
+          context_lines = n.to_i
+        end
+
+        p.on("--max-block-lines N", "Max lines to show per block (default: 24)") do |n|
+          max_block_lines = n.to_i
         end
 
         p.on("-h", "--help", "Show this help") do
@@ -103,7 +113,9 @@ module Xerp::CLI
           top_k: top_k,
           explain: explain,
           file_filter: file_filter,
-          file_type_filter: file_type_filter
+          file_type_filter: file_type_filter,
+          max_snippet_lines: max_block_lines,
+          context_lines: context_lines
         )
 
         response = engine.run(query_text.not_nil!, opts)

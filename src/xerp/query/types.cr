@@ -13,8 +13,8 @@ module Xerp::Query
       @explain : Bool = false,
       @file_filter : Regex? = nil,
       @file_type_filter : String? = nil,
-      @max_snippet_lines : Int32 = 30,
-      @context_lines : Int32 = 3
+      @max_snippet_lines : Int32 = 24,
+      @context_lines : Int32 = 2
     )
     end
   end
