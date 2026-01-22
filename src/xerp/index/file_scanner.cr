@@ -1,3 +1,4 @@
+require "ignoreme"
 require "../util/hash"
 
 module Xerp::Index
@@ -23,7 +24,7 @@ module Xerp::Index
     # Default directories to ignore.
     DEFAULT_IGNORE_DIRS = Set{
       ".git", ".xerp", ".hg", ".svn",
-      "node_modules", "vendor", "deps", "lib",
+      "node_modules", "vendor", "deps",
       "target", "build", "dist", "out", "_build",
       "__pycache__", ".pytest_cache", ".mypy_cache",
       ".idea", ".vscode", ".vs",
@@ -42,17 +43,43 @@ module Xerp::Index
       /Gemfile\.lock$/,
       /\.DS_Store$/,
       /Thumbs\.db$/,
+      /^\.env$/,          # .env files often contain secrets
+      /^\.env\..+$/,      # .env.local, .env.production, etc.
     ]
 
     @root : String
     @ignore_dirs : Set(String)
     @ignore_patterns : Array(Regex)
+    @ignoreme : Ignoreme::Matcher
 
     def initialize(@root : String,
                    ignore_dirs : Set(String)? = nil,
                    ignore_patterns : Array(Regex)? = nil)
       @ignore_dirs = ignore_dirs || DEFAULT_IGNORE_DIRS
       @ignore_patterns = ignore_patterns || DEFAULT_IGNORE_PATTERNS
+      @ignoreme = load_ignore_files
+    end
+
+    # Loads .gitignore and .xerpignore files if present.
+    # TODO: Support .gitignore files in subdirectories (apply to that dir and below).
+    private def load_ignore_files : Ignoreme::Matcher
+      matcher = Ignoreme::Matcher.new
+
+      # Load .gitignore
+      gitignore_path = File.join(@root, ".gitignore")
+      if File.exists?(gitignore_path)
+        content = File.read(gitignore_path)
+        matcher.add(content)
+      end
+
+      # Load .xerpignore (xerp-specific overrides)
+      xerpignore_path = File.join(@root, ".xerpignore")
+      if File.exists?(xerpignore_path)
+        content = File.read(xerpignore_path)
+        matcher.add(content)
+      end
+
+      matcher
     end
 
     # Scans all files in the root directory.
@@ -78,7 +105,7 @@ module Xerp::Index
 
     private def scan_dir(dir : String, &block : ScannedFile ->) : Nil
       Dir.each_child(dir) do |entry|
-        next if entry.starts_with?(".")
+        # Skip specific dotdirs (handled by ignore_dirs), not all dotfiles
         next if @ignore_dirs.includes?(entry)
 
         full_path = File.join(dir, entry)
@@ -102,7 +129,9 @@ module Xerp::Index
     end
 
     private def should_ignore_file?(rel_path : String) : Bool
-      @ignore_patterns.any? { |pattern| rel_path.matches?(pattern) }
+      return true if @ignore_patterns.any? { |pattern| rel_path.matches?(pattern) }
+      return true if @ignoreme.ignores?(rel_path)
+      false
     end
 
     private def read_file(rel_path : String, abs_path : String) : ScannedFile?

@@ -192,6 +192,10 @@ module Xerp::Tokenize
 
       if existing = token_lines[token]?
         existing[1] << line_num
+        # Upgrade kind if new kind has higher weight (e.g., Ident > Word)
+        if Xerp::Tokenize.weight_for(kind) > Xerp::Tokenize.weight_for(existing[0])
+          token_lines[token] = {kind, existing[1]}
+        end
       else
         token_lines[token] = {kind, Set{line_num}}
       end

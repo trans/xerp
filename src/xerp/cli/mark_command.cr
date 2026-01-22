@@ -17,16 +17,23 @@ module Xerp::CLI
         return 1
       end
 
-      # Determine kind from flags
-      kind : String? = nil
-      kind = "promising" if result["promising"]?.try(&.as_bool)
-      kind = "useful" if result["useful"]?.try(&.as_bool)
-      kind = "not_useful" if result["not-useful"]?.try(&.as_bool)
+      # Determine kind from flags (error if multiple specified)
+      kinds = [] of String
+      kinds << "promising" if result["promising"]?.try(&.as_bool)
+      kinds << "useful" if result["useful"]?.try(&.as_bool)
+      kinds << "not_useful" if result["not-useful"]?.try(&.as_bool)
 
-      unless kind
+      if kinds.empty?
         STDERR.puts "Error: Must specify --promising, --useful, or --not-useful"
         return 1
       end
+
+      if kinds.size > 1
+        STDERR.puts "Error: Cannot specify multiple feedback types (got: #{kinds.join(", ")})"
+        return 1
+      end
+
+      kind = kinds.first
 
       note = result["note"]?.try(&.as_s)
       query_hash : String? = nil  # Could add to schema if needed

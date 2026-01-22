@@ -83,7 +83,7 @@ describe Xerp::Config do
 
   it "has sensible defaults" do
     config = Xerp::Config.new("/tmp/test")
-    config.tab_width.should eq(4)
+    config.tab_width.should eq(0)  # 0 = auto-detect
     config.max_token_len.should eq(128)
     config.max_candidates.should eq(1000)
     config.default_top_k.should eq(20)
@@ -98,7 +98,7 @@ describe Xerp::Store::Database do
     begin
       database = Xerp::Store::Database.new(db_path)
       database.migrate!
-      database.schema_version.should eq(1)
+      database.schema_version.should eq(2)
 
       # Verify tables exist
       database.with_connection do |db|
@@ -116,6 +116,7 @@ describe Xerp::Store::Database do
         tables.should contain("feedback_events")
         tables.should contain("feedback_stats")
         tables.should contain("token_vectors")
+        tables.should contain("line_cache")
       end
     ensure
       File.delete(db_path) if File.exists?(db_path)

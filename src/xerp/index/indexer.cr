@@ -53,6 +53,8 @@ module Xerp::Index
           db.exec("DELETE FROM postings")
           db.exec("DELETE FROM blocks")
           db.exec("DELETE FROM block_line_map")
+          db.exec("DELETE FROM line_cache")
+          db.exec("DELETE FROM tokens")
           db.exec("DELETE FROM files")
         end
 
@@ -85,6 +87,11 @@ module Xerp::Index
 
         # Update df for affected tokens
         PostingsBuilder.update_df_for_tokens(db, all_token_ids)
+
+        # Clean up orphaned tokens (no postings)
+        if files_removed > 0 || rebuild
+          db.exec("DELETE FROM tokens WHERE token_id NOT IN (SELECT DISTINCT token_id FROM postings)")
+        end
 
         tokens_total = Store::Statements.token_count(db)
       end
