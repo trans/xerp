@@ -60,17 +60,10 @@ module Xerp::Index
       @ignoreme = load_ignore_files
     end
 
-    # Loads .gitignore and .xerpignore files if present.
-    # TODO: Support .gitignore files in subdirectories (apply to that dir and below).
+    # Loads all .gitignore files from project tree plus .xerpignore if present.
     private def load_ignore_files : Ignoreme::Matcher
-      matcher = Ignoreme::Matcher.new
-
-      # Load .gitignore
-      gitignore_path = File.join(@root, ".gitignore")
-      if File.exists?(gitignore_path)
-        content = File.read(gitignore_path)
-        matcher.add(content)
-      end
+      # Load all .gitignore files from root and subdirectories
+      matcher = Ignoreme.root(@root)
 
       # Load .xerpignore (xerp-specific overrides)
       xerpignore_path = File.join(@root, ".xerpignore")

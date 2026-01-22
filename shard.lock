@@ -10,7 +10,7 @@ shards:
 
   ignoreme:
     git: https://github.com/trans/ignoreme.git
-    version: 0.1.0
+    version: 0.2.0
 
   sqlite3:
     git: https://github.com/crystal-lang/crystal-sqlite3.git
