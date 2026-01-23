@@ -100,7 +100,8 @@ module Xerp::Store
           start_line      INTEGER NOT NULL,
           end_line        INTEGER NOT NULL,
           header_text     TEXT,
-          parent_block_id INTEGER REFERENCES blocks(block_id) ON DELETE CASCADE
+          parent_block_id INTEGER REFERENCES blocks(block_id) ON DELETE CASCADE,
+          token_count     INTEGER NOT NULL DEFAULT 0
         )
       SQL
 

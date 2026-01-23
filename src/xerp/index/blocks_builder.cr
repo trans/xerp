@@ -1,9 +1,17 @@
 require "../adapters/adapter"
 require "../store/statements"
+require "../tokenize/tokenizer"
+require "../tokenize/kinds"
 require "../util/varint"
 
 module Xerp::Index
   module BlocksBuilder
+    # Token kinds that count toward block size (eligible for salience normalization)
+    ELIGIBLE_KINDS = Set{
+      Tokenize::TokenKind::Ident,
+      Tokenize::TokenKind::Compound,
+      Tokenize::TokenKind::Word,
+    }
     # Builds blocks from adapter result and stores them in the database.
     # Returns an array of database block_ids corresponding to the adapter blocks.
     def self.build(db : DB::Database, file_id : Int64,
@@ -75,6 +83,36 @@ module Xerp::Index
     # Decodes a block_line_map blob back to block_ids per line.
     def self.decode_line_map(blob : Bytes) : Array(Int64)
       Util.decode_u32_list(blob).map(&.to_i64)
+    end
+
+    # Computes and stores token counts per block.
+    # block_idx_by_line: maps line index (0-based) to block index
+    # tokens_by_line: from TokenizeResult, maps line index to token occurrences
+    # block_ids: database block_ids corresponding to block indices
+    def self.update_token_counts(db : DB::Database,
+                                  block_idx_by_line : Array(Int32),
+                                  tokens_by_line : Array(Array(Tokenize::TokenOcc)),
+                                  block_ids : Array(Int64)) : Nil
+      return if block_ids.empty?
+
+      # Accumulate token counts per block index
+      counts = Array(Int32).new(block_ids.size, 0)
+
+      tokens_by_line.each_with_index do |line_tokens, line_idx|
+        next if line_idx >= block_idx_by_line.size
+
+        block_idx = block_idx_by_line[line_idx]
+        next if block_idx < 0 || block_idx >= block_ids.size
+
+        # Count eligible tokens on this line
+        eligible_count = line_tokens.count { |t| ELIGIBLE_KINDS.includes?(t.kind) }
+        counts[block_idx] += eligible_count
+      end
+
+      # Update each block with its token count
+      block_ids.each_with_index do |block_id, idx|
+        db.exec("UPDATE blocks SET token_count = ? WHERE block_id = ?", counts[idx], block_id)
+      end
     end
   end
 end

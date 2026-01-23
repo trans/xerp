@@ -157,7 +157,15 @@ module Xerp::Index
       )
 
       # Store blocks
-      BlocksBuilder.build(db, file_id, block_result)
+      block_ids = BlocksBuilder.build(db, file_id, block_result)
+
+      # Compute and store token counts per block (for salience scoring)
+      BlocksBuilder.update_token_counts(
+        db,
+        block_result.block_idx_by_line,
+        tokenize_result.tokens_by_line,
+        block_ids
+      )
 
       # Store postings
       token_ids = PostingsBuilder.build(db, file_id, tokenize_result)

@@ -6,6 +6,7 @@ require "../util/hash"
 require "./types"
 require "./expansion"
 require "./scorer"
+require "./scope_scorer"
 require "./snippet"
 require "./result_id"
 require "./explain"
@@ -65,12 +66,12 @@ module Xerp::Query
         # Expand tokens
         expanded = Expansion.expand(db, query_tokens)
 
-        # Score blocks
-        block_scores = Scorer.score_blocks(db, expanded, opts)
-        total_candidates = block_scores.size
+        # Score scopes using DESIGN02-00 algorithm
+        scope_scores = ScopeScorer.score_scopes(db, expanded, opts)
+        total_candidates = scope_scores.size
 
         # Build results
-        results = build_results(db, block_scores, expanded, opts)
+        results = build_scope_results(db, scope_scores, expanded, opts)
 
         # Include expansion info if explaining
         if opts.explain
@@ -138,6 +139,79 @@ module Xerp::Query
           line_start: block_row.line_start,
           line_end: block_row.line_end,
           score: bs.score,
+          snippet: snippet_result.content,
+          snippet_start: snippet_result.snippet_start,
+          header_text: header_text,
+          hits: hits,
+          warn: snippet_result.error,
+          ancestry: ancestry
+        )
+      end
+
+      results
+    end
+
+    # Builds results from scope scores (DESIGN02-00).
+    private def build_scope_results(db : DB::Database,
+                                     scope_scores : Array(ScopeScorer::ScopeScore),
+                                     expanded : Hash(String, Array(Expansion::ExpandedToken)),
+                                     opts : QueryOptions) : Array(QueryResult)
+      results = [] of QueryResult
+
+      scope_scores.each do |ss|
+        # Get file info
+        file_row = Store::Statements.select_file_by_id(db, ss.file_id)
+        next unless file_row
+
+        # Get block info
+        block_row = Store::Statements.select_block_by_id(db, ss.block_id)
+        next unless block_row
+
+        # Get hit lines for snippet extraction
+        hit_lines = ss.token_hits.values.flat_map(&.lines).uniq.sort
+
+        # Extract snippet
+        snippet_result = Snippet.extract_with_error(
+          @config.workspace_root,
+          file_row.rel_path,
+          block_row,
+          hit_lines,
+          opts.max_snippet_lines,
+          opts.context_lines
+        )
+
+        # Generate stable result ID
+        result_id = ResultId.generate(file_row.rel_path, block_row, file_row.content_hash)
+
+        # Build hits if explaining
+        hits = if opts.explain
+                 ss.token_hits.values.map do |th|
+                   HitInfo.new(
+                     token: th.token,
+                     from_query_token: th.original_query_token,
+                     similarity: th.similarity,
+                     lines: th.lines,
+                     contribution: th.contribution
+                   )
+                 end
+               else
+                 nil
+               end
+
+        # Build ancestry chain if requested
+        ancestry = build_ancestry(db, file_row.id, block_row) if opts.ancestry
+
+        # Get header from immediate parent via line_cache
+        header_text = get_parent_header(db, file_row.id, block_row)
+
+        results << QueryResult.new(
+          result_id: result_id,
+          file_path: file_row.rel_path,
+          file_type: file_row.file_type,
+          block_id: ss.block_id,
+          line_start: block_row.line_start,
+          line_end: block_row.line_end,
+          score: ss.score,
           snippet: snippet_result.content,
           snippet_start: snippet_result.snippet_start,
           header_text: header_text,
