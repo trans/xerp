@@ -3,8 +3,29 @@ require "../tokenize/kinds"
 
 module Xerp::Vectors
   # Builds token co-occurrence counts from the indexed corpus.
-  # MODEL_LINE: sliding window co-occurrence within text (sibling tokens)
-  # MODEL_HEIR: virtual sequences of reversed ancestor headers + line tokens (parent/child relationships)
+  #
+  # Current models:
+  #   MODEL_LINE: sliding window co-occurrence within indentation blocks
+  #   MODEL_HEIR: virtual sequences of [reversed_ancestor_headers..., line_tokens]
+  #
+  # TODO: Consider a third "scope" model (cooc.scope.v1)
+  # =====================================================
+  # Currently MODEL_LINE iterates over indentation-based blocks and runs sliding
+  # window on all tokens within each block (in arbitrary posting order, not text order).
+  # This is really "scope-based co-occurrence" - tokens in the same indentation block
+  # tend to co-occur - not true linear text proximity.
+  #
+  # MODEL_HEIR (old approach) did something similar: paired every token in a block
+  # with every signature token (top-16 by TF-IDF) from that block and ancestor blocks.
+  # This caused a token × signature × depth explosion (2.8M pairs).
+  #
+  # MODEL_HEIR (new approach) is now line-based: for each line, creates virtual
+  # sequences [reversed_header..., line_tokens] for each ancestor, then runs
+  # windowed co-occurrence. This captures header↔child relationships efficiently.
+  #
+  # A future "true linear" model could do line-based co-occurrence without headers,
+  # capturing tokens that appear on the same line or adjacent lines.
+  # The current MODEL_LINE could then be renamed to MODEL_SCOPE.
   module Cooccurrence
     # Model identifiers
     MODEL_LINE = "cooc.line.v1"
