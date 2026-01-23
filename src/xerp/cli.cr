@@ -7,6 +7,7 @@ require "./cli/query_command"
 require "./cli/mark_command"
 require "./cli/train_command"
 require "./cli/neighbors_command"
+require "./cli/terms_command"
 
 module Xerp::CLI
   VERSION = Xerp::VERSION
@@ -224,6 +225,42 @@ module Xerp::CLI
     "required": ["token"]
   })
 
+  TERMS_SCHEMA = %({
+    "type": "object",
+    "description": "Extract salient terms from matching scopes",
+    "positional": ["query"],
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Search query"
+      },
+      "root": {
+        "type": "string",
+        "description": "Workspace root directory"
+      },
+      "top": {
+        "type": "integer",
+        "default": 30,
+        "description": "Number of terms to return"
+      },
+      "top-blocks": {
+        "type": "integer",
+        "default": 20,
+        "description": "Number of blocks to analyze"
+      },
+      "min-idf": {
+        "type": "number",
+        "default": 0.5,
+        "description": "Minimum IDF threshold (filters common terms)"
+      },
+      "json": {
+        "type": "boolean",
+        "description": "Output as JSON"
+      }
+    },
+    "required": ["query"]
+  })
+
   def self.run(args : Array(String)) : Int32
     # Handle top-level flags before CLJ parsing
     if args.empty? || args == ["help"] || args == ["-h"] || args == ["--help"]
@@ -243,6 +280,7 @@ module Xerp::CLI
     cli.subcommand("mark", MARK_SCHEMA)
     cli.subcommand("train", TRAIN_SCHEMA)
     cli.subcommand("neighbors", NEIGHBORS_SCHEMA)
+    cli.subcommand("terms", TERMS_SCHEMA)
     cli.default_subcommand("query")
 
     result = cli.parse(args)
@@ -263,6 +301,8 @@ module Xerp::CLI
       TrainCommand.run(result)
     when "neighbors"
       NeighborsCommand.run(result)
+    when "terms"
+      TermsCommand.run(result)
     else
       print_usage
       0
@@ -277,6 +317,7 @@ module Xerp::CLI
     puts "Commands:"
     puts "  index      Index workspace files"
     puts "  query      Search indexed content (alias: q)"
+    puts "  terms      Extract salient terms from matching scopes"
     puts "  mark       Record feedback on results"
     puts "  train      Train semantic token vectors"
     puts "  neighbors  Show nearest neighbors for a token"
@@ -291,5 +332,6 @@ module Xerp::CLI
     puts "  xerp mark abc123 --useful     # Mark result as useful"
     puts "  xerp train                    # Train semantic vectors"
     puts "  xerp neighbors retry --top 10 # Show similar tokens"
+    puts "  xerp terms retry              # Find related vocabulary"
   end
 end

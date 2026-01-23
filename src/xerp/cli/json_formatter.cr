@@ -1,5 +1,6 @@
 require "json"
 require "../query/types"
+require "../query/terms"
 require "../index/indexer"
 require "../vectors/trainer"
 
@@ -150,6 +151,27 @@ module Xerp::CLI::JsonFormatter
               json.object do
                 json.field "token", neighbor
                 json.field "similarity", similarity
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  # Formats salient terms as JSON (pretty-printed).
+  def self.format_terms(result : Query::Terms::TermsResult) : String
+    JSON.build(indent: "  ") do |json|
+      json.object do
+        json.field "query", result.query
+        json.field "timing_ms", result.timing_ms
+        json.field "terms" do
+          json.array do
+            result.terms.each do |term|
+              json.object do
+                json.field "term", term.term
+                json.field "salience", term.salience
+                json.field "is_query_term", term.is_query_term
               end
             end
           end

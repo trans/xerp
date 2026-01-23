@@ -1,5 +1,6 @@
 require "../query/types"
 require "../query/snippet"
+require "../query/terms"
 require "../index/indexer"
 require "../vectors/trainer"
 
@@ -240,6 +241,41 @@ module Xerp::CLI::HumanFormatter
     end
 
     result.to_s
+  end
+
+  # Formats salient terms for human reading.
+  def self.format_terms(result : Query::Terms::TermsResult) : String
+    output = String::Builder.new
+
+    output << "xerp terms: \""
+    output << truncate(result.query, 40)
+    output << "\" ("
+    output << result.terms.size
+    output << " terms, "
+    output << result.timing_ms
+    output << "ms)\n\n"
+
+    if result.terms.empty?
+      output << "No salient terms found.\n"
+      return output.to_s
+    end
+
+    # Find max term length for alignment
+    max_len = result.terms.map(&.term.size).max
+    max_len = Math.min(max_len, 30)
+
+    result.terms.each do |term|
+      # Mark query terms with *
+      marker = term.is_query_term ? "*" : " "
+      output << marker
+      output << term.term.ljust(max_len)
+      output << "  "
+      output << sprintf("%.3f", term.salience)
+      output << "\n"
+    end
+
+    output << "\n* = query term\n"
+    output.to_s
   end
 
   private def self.truncate(str : String, max_len : Int32) : String
