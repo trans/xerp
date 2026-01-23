@@ -1,11 +1,10 @@
 require "../store/statements"
 require "../tokenize/kinds"
-require "../index/block_sig_builder"
 
 module Xerp::Vectors
   # Builds token co-occurrence counts from the indexed corpus.
-  # Uses a sliding window approach within block-segmented token sequences.
-  # Optionally includes hierarchical context from ancestor blocks.
+  # MODEL_LINE: sliding window co-occurrence within text (sibling tokens)
+  # MODEL_HEIR: virtual sequences of reversed ancestor headers + line tokens (parent/child relationships)
   module Cooccurrence
     # Model identifiers
     MODEL_LINE = "cooc.line.v1"
@@ -18,8 +17,8 @@ module Xerp::Vectors
     DEFAULT_TOP_NEIGHBORS = 32 # Max neighbors to store per token
 
     # Hierarchical context parameters
-    DEFAULT_MAX_ANCESTOR_DEPTH = 3  # How far up the block tree to look
-    ANCESTOR_DECAY = [1.0, 0.7, 0.5, 0.35]  # Weight decay by depth (0=self, 1=parent, etc.)
+    DEFAULT_MAX_ANCESTOR_DEPTH = 2  # How far up the block tree to look (parent + grandparent)
+    ANCESTOR_DECAY = [1.0, 0.7, 0.5]  # Weight decay by depth (0=parent, 1=grandparent, 2=great-grandparent)
 
     # Result of co-occurrence training
     struct TrainResult
@@ -33,8 +32,8 @@ module Xerp::Vectors
     end
 
     # Builds co-occurrence counts from all indexed files for a specific model.
-    # MODEL_LINE: sliding window co-occurrence within blocks
-    # MODEL_HEIR: hierarchical co-occurrence from ancestor block signatures
+    # MODEL_LINE: sliding window co-occurrence within blocks (sibling relationships)
+    # MODEL_HEIR: virtual sequences with ancestor headers (parent/child relationships)
     def self.build_counts(db : DB::Database,
                           model : String,
                           window_size : Int32 = DEFAULT_WINDOW_SIZE) : Int64
@@ -44,11 +43,6 @@ module Xerp::Vectors
 
       # Clear existing co-occurrence data for this model only
       db.exec("DELETE FROM token_cooccurrence WHERE model = ?", model)
-
-      # Build block signatures if using hierarchical model
-      if model == MODEL_HEIR
-        Index::BlockSigBuilder.build_all(db)
-      end
 
       # Build counts from each file
       files = Store::Statements.all_files(db)
@@ -78,15 +72,8 @@ module Xerp::Vectors
           pairs_count += count_window_pairs(db, model, tokens_in_block, window_size)
         end
       elsif model == MODEL_HEIR
-        # Hierarchical model: ancestor block signature context only
-        block_signatures = get_block_signatures(db, blocks)
-        block_by_id = blocks.map { |b| {b.block_id, b} }.to_h
-
-        blocks.each do |block|
-          tokens_in_block = extract_tokens_in_block(postings, block)
-          next if tokens_in_block.empty?
-          pairs_count += count_hierarchical_pairs(db, model, tokens_in_block, block, block_by_id, block_signatures)
-        end
+        # Hierarchical model: virtual sequences with ancestor headers
+        pairs_count += count_hierarchical_pairs_new(db, model, file_id, blocks, postings, window_size)
       end
 
       pairs_count
@@ -105,58 +92,55 @@ module Xerp::Vectors
       tokens
     end
 
-    # Counts hierarchical co-occurrences between tokens and ancestor block signatures.
-    private def self.count_hierarchical_pairs(db : DB::Database,
-                                              model : String,
-                                              tokens_in_block : Array(Int64),
-                                              block : FileBlockWithParent,
-                                              block_by_id : Hash(Int64, FileBlockWithParent),
-                                              block_signatures : Hash(Int64, Array({Int64, Float64}))) : Int64
+    # Counts hierarchical co-occurrences using virtual sequences.
+    # For each line, creates separate virtual sequences for each ancestor level:
+    #   [reversed_header_tokens..., line_tokens...]
+    # Then runs windowed co-occurrence with depth-based weight multiplier.
+    private def self.count_hierarchical_pairs_new(db : DB::Database,
+                                                  model : String,
+                                                  file_id : Int64,
+                                                  blocks : Array(FileBlockWithParent),
+                                                  postings : Array(FilePosting),
+                                                  window_size : Int32) : Int64
+      return 0_i64 if blocks.empty?
+
+      # Get header tokens for each block (first line tokens)
+      block_headers = get_block_header_tokens(db, file_id, blocks)
+
+      # Group postings by line number
+      postings_by_line = group_postings_by_line(postings)
+
+      # Build block lookup and determine line ranges
+      block_by_id = blocks.map { |b| {b.block_id, b} }.to_h
+
+      # Accumulate all counts in memory first
       counts = Hash({Int64, Int64}, Float64).new(0.0)
 
-      # Get unique tokens in this block
-      unique_tokens = tokens_in_block.to_set
+      postings_by_line.each do |line_num, line_token_ids|
+        next if line_token_ids.empty?
 
-      # Walk up ancestor chain
-      current_block_id = block.block_id
-      depth = 0
+        # Get ancestor chain for this line (innermost first)
+        ancestors = get_ancestor_chain(line_num, blocks, block_by_id)
 
-      while depth <= DEFAULT_MAX_ANCESTOR_DEPTH
-        # Get signature for current block (including self at depth 0)
-        if sig = block_signatures[current_block_id]?
-          decay = ANCESTOR_DECAY[Math.min(depth, ANCESTOR_DECAY.size - 1)]
+        ancestors.each_with_index do |block, depth|
+          next if depth > DEFAULT_MAX_ANCESTOR_DEPTH
+          depth_weight = ANCESTOR_DECAY[Math.min(depth, ANCESTOR_DECAY.size - 1)]
 
-          sig.each do |(sig_token_id, sig_weight)|
-            unique_tokens.each do |token_id|
-              next if token_id == sig_token_id  # Skip self-pairs
+          # Get header tokens for this ancestor (reversed so start is closest to line)
+          header_tokens = block_headers[block.block_id]? || [] of Int64
+          reversed_header = header_tokens.reverse
 
-              # Weighted count based on signature weight and depth decay
-              weighted_count = sig_weight * decay
+          # Build virtual sequence: reversed header + line tokens
+          virtual_seq = reversed_header + line_token_ids
 
-              # Store bidirectionally
-              key1 = token_id < sig_token_id ? {token_id, sig_token_id} : {sig_token_id, token_id}
-              counts[key1] += weighted_count
-            end
-          end
-        end
-
-        # Move to parent
-        if current = block_by_id[current_block_id]?
-          if parent_id = current.parent_block_id
-            current_block_id = parent_id
-            depth += 1
-          else
-            break  # No more parents
-          end
-        else
-          break
+          # Run windowed co-occurrence with depth weight multiplier
+          count_window_pairs_weighted(virtual_seq, window_size, depth_weight, counts)
         end
       end
 
-      # Upsert weighted counts to database
+      # Upsert all counts to database
       pairs = 0_i64
       counts.each do |(token_id, context_id), weight|
-        # Convert to integer count (round up to at least 1 if significant)
         count = Math.max(1, weight.round.to_i32)
         upsert_cooccurrence(db, model, token_id, context_id, count)
         upsert_cooccurrence(db, model, context_id, token_id, count)
@@ -164,6 +148,109 @@ module Xerp::Vectors
       end
 
       pairs
+    end
+
+    # Gets header tokens (first line tokens) for each block.
+    private def self.get_block_header_tokens(db : DB::Database,
+                                             file_id : Int64,
+                                             blocks : Array(FileBlockWithParent)) : Hash(Int64, Array(Int64))
+      headers = Hash(Int64, Array(Int64)).new
+
+      # Get all start lines we need
+      start_lines = blocks.map(&.start_line).to_set
+
+      # Query postings for this file and filter to start lines
+      db.query(<<-SQL, file_id) do |rs|
+        SELECT p.token_id, p.lines_blob
+        FROM postings p
+        WHERE p.file_id = ?
+      SQL
+        rs.each do
+          token_id = rs.read(Int64)
+          lines_blob = rs.read(Bytes)
+          lines = Xerp::Index::PostingsBuilder.decode_lines(lines_blob)
+
+          lines.each do |line|
+            if start_lines.includes?(line)
+              # Find which block(s) start on this line
+              blocks.each do |block|
+                if block.start_line == line
+                  headers[block.block_id] ||= [] of Int64
+                  headers[block.block_id] << token_id
+                end
+              end
+            end
+          end
+        end
+      end
+
+      headers
+    end
+
+    # Groups postings by line number.
+    private def self.group_postings_by_line(postings : Array(FilePosting)) : Hash(Int32, Array(Int64))
+      by_line = Hash(Int32, Array(Int64)).new
+
+      postings.each do |posting|
+        posting.lines.each do |line|
+          by_line[line] ||= [] of Int64
+          by_line[line] << posting.token_id
+        end
+      end
+
+      by_line
+    end
+
+    # Gets the ancestor chain for a line (innermost/containing block first).
+    private def self.get_ancestor_chain(line_num : Int32,
+                                        blocks : Array(FileBlockWithParent),
+                                        block_by_id : Hash(Int64, FileBlockWithParent)) : Array(FileBlockWithParent)
+      ancestors = [] of FileBlockWithParent
+
+      # Find the innermost block containing this line
+      containing_block = blocks.find do |block|
+        line_num >= block.start_line && line_num <= block.end_line
+      end
+
+      return ancestors unless containing_block
+
+      # Walk up the ancestor chain
+      current = containing_block
+      while current
+        ancestors << current
+
+        if parent_id = current.parent_block_id
+          current = block_by_id[parent_id]?
+        else
+          break
+        end
+      end
+
+      ancestors
+    end
+
+    # Counts windowed co-occurrences with a weight multiplier, accumulating into counts hash.
+    private def self.count_window_pairs_weighted(tokens : Array(Int64),
+                                                 window_size : Int32,
+                                                 weight_multiplier : Float64,
+                                                 counts : Hash({Int64, Int64}, Float64)) : Nil
+      tokens.each_with_index do |token_id, i|
+        window_start = Math.max(0, i - window_size)
+        window_end = Math.min(tokens.size - 1, i + window_size)
+
+        (window_start..window_end).each do |j|
+          next if i == j
+          neighbor_id = tokens[j]
+          next if token_id == neighbor_id
+
+          distance = (i - j).abs
+          window_weight = (window_size - distance + 1).to_f64 / window_size.to_f64
+          weight = window_weight * weight_multiplier
+
+          key = token_id < neighbor_id ? {token_id, neighbor_id} : {neighbor_id, token_id}
+          counts[key] += weight
+        end
+      end
     end
 
     # Counts co-occurrences using sliding window within a token sequence.
@@ -488,34 +575,5 @@ module Xerp::Vectors
       postings
     end
 
-    # Loads block signatures for all blocks in the given list.
-    private def self.get_block_signatures(db : DB::Database,
-                                          blocks : Array(FileBlockWithParent)) : Hash(Int64, Array({Int64, Float64}))
-      signatures = Hash(Int64, Array({Int64, Float64})).new
-
-      block_ids = blocks.map(&.block_id)
-      return signatures if block_ids.empty?
-
-      # Query all signatures for these blocks
-      placeholders = block_ids.map { "?" }.join(", ")
-
-      db.query(<<-SQL % placeholders, args: block_ids.map(&.as(DB::Any))) do |rs|
-        SELECT block_id, token_id, weight
-        FROM block_sig_tokens
-        WHERE block_id IN (#{placeholders})
-        ORDER BY block_id, weight DESC
-      SQL
-        rs.each do
-          block_id = rs.read(Int64)
-          token_id = rs.read(Int64)
-          weight = rs.read(Float64)
-
-          signatures[block_id] ||= [] of {Int64, Float64}
-          signatures[block_id] << {token_id, weight}
-        end
-      end
-
-      signatures
-    end
   end
 end
