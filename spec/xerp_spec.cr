@@ -98,7 +98,7 @@ describe Xerp::Store::Database do
     begin
       database = Xerp::Store::Database.new(db_path)
       database.migrate!
-      database.schema_version.should eq(2)
+      database.schema_version.should eq(5)
 
       # Verify tables exist
       database.with_connection do |db|
@@ -117,6 +117,11 @@ describe Xerp::Store::Database do
         tables.should contain("feedback_stats")
         tables.should contain("token_vectors")
         tables.should contain("line_cache")
+        # v0.2 tables
+        tables.should contain("token_neighbors")
+        tables.should contain("token_vector_norms")
+        tables.should contain("token_cooccurrence")
+        tables.should contain("block_sig_tokens")
       end
     ensure
       File.delete(db_path) if File.exists?(db_path)

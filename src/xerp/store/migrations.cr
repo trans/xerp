@@ -2,7 +2,7 @@ require "sqlite3"
 
 module Xerp::Store
   module Migrations
-    CURRENT_VERSION = 2
+    CURRENT_VERSION = 5
 
     # Runs all pending migrations on the database.
     def self.migrate!(db : DB::Database) : Nil
@@ -31,6 +31,9 @@ module Xerp::Store
       case version
       when 1 then migrate_v1(db)
       when 2 then migrate_v2(db)
+      when 3 then migrate_v3(db)
+      when 4 then migrate_v4(db)
+      when 5 then migrate_v5(db)
       else        raise "Unknown migration version: #{version}"
       end
     end
@@ -161,6 +164,133 @@ module Xerp::Store
 
       # Note: We leave header_text in blocks table for now (SQLite doesn't support DROP COLUMN easily)
       # It will just be unused - block start lines are now in line_cache
+    end
+
+    # Migration v3: Add token neighbor cache for semantic expansion (v0.2)
+    private def self.migrate_v3(db : DB::Database) : Nil
+      # Pre-computed nearest neighbors for fast query-time expansion
+      db.exec <<-SQL
+        CREATE TABLE IF NOT EXISTS token_neighbors (
+          token_id     INTEGER NOT NULL REFERENCES tokens(token_id) ON DELETE CASCADE,
+          neighbor_id  INTEGER NOT NULL REFERENCES tokens(token_id) ON DELETE CASCADE,
+          similarity   REAL NOT NULL,
+          PRIMARY KEY (token_id, neighbor_id)
+        )
+      SQL
+
+      db.exec <<-SQL
+        CREATE INDEX IF NOT EXISTS idx_token_neighbors_similarity
+        ON token_neighbors(token_id, similarity DESC)
+      SQL
+
+      # Cached vector norms for cosine similarity computation
+      db.exec <<-SQL
+        CREATE TABLE IF NOT EXISTS token_vector_norms (
+          token_id INTEGER PRIMARY KEY REFERENCES tokens(token_id) ON DELETE CASCADE,
+          norm     REAL NOT NULL
+        )
+      SQL
+
+      # Co-occurrence counts (sparse vector representation)
+      # Stores raw counts before normalization into neighbors
+      db.exec <<-SQL
+        CREATE TABLE IF NOT EXISTS token_cooccurrence (
+          token_id    INTEGER NOT NULL REFERENCES tokens(token_id) ON DELETE CASCADE,
+          context_id  INTEGER NOT NULL REFERENCES tokens(token_id) ON DELETE CASCADE,
+          count       INTEGER NOT NULL,
+          PRIMARY KEY (token_id, context_id)
+        )
+      SQL
+    end
+
+    # Migration v4: Add block signature tokens for hierarchical context training
+    private def self.migrate_v4(db : DB::Database) : Nil
+      # Block signatures - weighted tokens summarizing each block's intent
+      # Used for hierarchical context training (tokens inherit meaning from ancestors)
+      db.exec <<-SQL
+        CREATE TABLE IF NOT EXISTS block_sig_tokens (
+          block_id INTEGER NOT NULL REFERENCES blocks(block_id) ON DELETE CASCADE,
+          token_id INTEGER NOT NULL REFERENCES tokens(token_id) ON DELETE CASCADE,
+          weight   REAL NOT NULL,
+          PRIMARY KEY (block_id, token_id)
+        )
+      SQL
+
+      db.exec <<-SQL
+        CREATE INDEX IF NOT EXISTS idx_block_sig_tokens_token
+        ON block_sig_tokens(token_id)
+      SQL
+    end
+
+    # Migration v5: Add model column to vector tables for multi-model support
+    private def self.migrate_v5(db : DB::Database) : Nil
+      # Recreate token_cooccurrence with model column
+      db.exec <<-SQL
+        CREATE TABLE token_cooccurrence_new (
+          model       TEXT NOT NULL,
+          token_id    INTEGER NOT NULL REFERENCES tokens(token_id) ON DELETE CASCADE,
+          context_id  INTEGER NOT NULL REFERENCES tokens(token_id) ON DELETE CASCADE,
+          count       INTEGER NOT NULL,
+          PRIMARY KEY (model, token_id, context_id)
+        )
+      SQL
+
+      db.exec <<-SQL
+        INSERT INTO token_cooccurrence_new (model, token_id, context_id, count)
+        SELECT 'cooc.line.v1', token_id, context_id, count
+        FROM token_cooccurrence
+      SQL
+
+      db.exec "DROP TABLE token_cooccurrence"
+      db.exec "ALTER TABLE token_cooccurrence_new RENAME TO token_cooccurrence"
+
+      db.exec <<-SQL
+        CREATE INDEX idx_cooccurrence_model ON token_cooccurrence(model)
+      SQL
+
+      # Recreate token_neighbors with model column
+      db.exec <<-SQL
+        CREATE TABLE token_neighbors_new (
+          model        TEXT NOT NULL,
+          token_id     INTEGER NOT NULL REFERENCES tokens(token_id) ON DELETE CASCADE,
+          neighbor_id  INTEGER NOT NULL REFERENCES tokens(token_id) ON DELETE CASCADE,
+          similarity   REAL NOT NULL,
+          PRIMARY KEY (model, token_id, neighbor_id)
+        )
+      SQL
+
+      db.exec <<-SQL
+        INSERT INTO token_neighbors_new (model, token_id, neighbor_id, similarity)
+        SELECT 'cooc.line.v1', token_id, neighbor_id, similarity
+        FROM token_neighbors
+      SQL
+
+      db.exec "DROP TABLE token_neighbors"
+      db.exec "ALTER TABLE token_neighbors_new RENAME TO token_neighbors"
+
+      db.exec <<-SQL
+        CREATE INDEX idx_token_neighbors_model_similarity
+        ON token_neighbors(model, token_id, similarity DESC)
+      SQL
+
+      # Recreate token_vector_norms with model column
+      db.exec <<-SQL
+        CREATE TABLE token_vector_norms_new (
+          model    TEXT NOT NULL,
+          token_id INTEGER NOT NULL REFERENCES tokens(token_id) ON DELETE CASCADE,
+          norm     REAL NOT NULL,
+          PRIMARY KEY (model, token_id)
+        )
+      SQL
+
+      db.exec <<-SQL
+        INSERT INTO token_vector_norms_new (model, token_id, norm)
+        SELECT 'cooc.line.v1', token_id, norm
+        FROM token_vector_norms
+      SQL
+
+      db.exec "DROP TABLE token_vector_norms"
+      db.exec "ALTER TABLE token_vector_norms_new RENAME TO token_vector_norms"
     end
   end
 end

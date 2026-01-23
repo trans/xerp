@@ -28,7 +28,12 @@ require "./xerp/adapters/classify"
 require "./xerp/index/file_scanner"
 require "./xerp/index/blocks_builder"
 require "./xerp/index/postings_builder"
+require "./xerp/index/block_sig_builder"
 require "./xerp/index/indexer"
+
+# Vectors (semantic expansion)
+require "./xerp/vectors/cooccurrence"
+require "./xerp/vectors/trainer"
 
 # Query
 require "./xerp/query/types"

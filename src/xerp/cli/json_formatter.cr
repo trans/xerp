@@ -1,6 +1,7 @@
 require "json"
 require "../query/types"
 require "../index/indexer"
+require "../vectors/trainer"
 
 module Xerp::CLI::JsonFormatter
   # Formats a query response as JSON (pretty-printed).
@@ -80,6 +81,69 @@ module Xerp::CLI::JsonFormatter
         json.field "kind", kind
         json.field "event_id", event_id
         json.field "success", true
+      end
+    end
+  end
+
+  # Formats training stats as JSON (pretty-printed) - legacy single model.
+  def self.format_train_stats(stats : Vectors::TrainStats, workspace_root : String) : String
+    JSON.build(indent: "  ") do |json|
+      json.object do
+        json.field "workspace", workspace_root
+        json.field "model", stats.model
+        json.field "pairs_stored", stats.pairs_stored
+        json.field "neighbors_computed", stats.neighbors_computed
+        json.field "elapsed_ms", stats.elapsed_ms
+      end
+    end
+  end
+
+  # Formats multi-model training stats as JSON (pretty-printed).
+  def self.format_multi_train_stats(stats : Vectors::MultiModelTrainStats, workspace_root : String) : String
+    JSON.build(indent: "  ") do |json|
+      json.object do
+        json.field "workspace", workspace_root
+        json.field "total_elapsed_ms", stats.total_elapsed_ms
+
+        if line_stats = stats.line_stats
+          json.field "cooc.line.v1" do
+            json.object do
+              json.field "pairs_stored", line_stats.pairs_stored
+              json.field "neighbors_computed", line_stats.neighbors_computed
+              json.field "elapsed_ms", line_stats.elapsed_ms
+            end
+          end
+        end
+
+        if heir_stats = stats.heir_stats
+          json.field "cooc.heir.v1" do
+            json.object do
+              json.field "pairs_stored", heir_stats.pairs_stored
+              json.field "neighbors_computed", heir_stats.neighbors_computed
+              json.field "elapsed_ms", heir_stats.elapsed_ms
+            end
+          end
+        end
+      end
+    end
+  end
+
+  # Formats token neighbors as JSON (pretty-printed).
+  def self.format_neighbors(token : String, neighbors : Array({String, Float64}), model : String = "blend") : String
+    JSON.build(indent: "  ") do |json|
+      json.object do
+        json.field "token", token
+        json.field "model", model
+        json.field "neighbors" do
+          json.array do
+            neighbors.each do |(neighbor, similarity)|
+              json.object do
+                json.field "token", neighbor
+                json.field "similarity", similarity
+              end
+            end
+          end
+        end
       end
     end
   end

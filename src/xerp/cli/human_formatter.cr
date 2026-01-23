@@ -1,6 +1,7 @@
 require "../query/types"
 require "../query/snippet"
 require "../index/indexer"
+require "../vectors/trainer"
 
 module Xerp::CLI::HumanFormatter
   # Formats a query response for human reading.
@@ -87,7 +88,9 @@ module Xerp::CLI::HumanFormatter
           if hit.token != hit.from_query_token
             result << " (from '"
             result << hit.from_query_token
-            result << "')"
+            result << "', sim: "
+            result << sprintf("%.2f", hit.similarity)
+            result << ")"
           end
           result << " -> lines "
           result << hit.lines.first(5).join(", ")
@@ -140,6 +143,90 @@ module Xerp::CLI::HumanFormatter
   # Formats a mark confirmation for human reading.
   def self.format_mark_confirmation(result_id : String, kind : String) : String
     "Marked result #{truncate(result_id, 16)} as #{kind.gsub("_", " ")}\n"
+  end
+
+  # Formats training stats for human reading (legacy single model).
+  def self.format_train_stats(stats : Vectors::TrainStats, workspace_root : String) : String
+    result = String::Builder.new
+
+    result << "Training vectors for "
+    result << workspace_root
+    result << "...\n"
+    result << "  model:               "
+    result << stats.model
+    result << "\n"
+    result << "  co-occurrence pairs: "
+    result << stats.pairs_stored
+    result << "\n"
+    result << "  neighbors computed:  "
+    result << stats.neighbors_computed
+    result << "\n"
+    result << "  time:                "
+    result << stats.elapsed_ms
+    result << "ms\n"
+
+    result.to_s
+  end
+
+  # Formats multi-model training stats for human reading.
+  def self.format_multi_train_stats(stats : Vectors::MultiModelTrainStats, workspace_root : String) : String
+    result = String::Builder.new
+
+    result << "Training vectors for "
+    result << workspace_root
+    result << "...\n\n"
+
+    if line_stats = stats.line_stats
+      result << "cooc.line.v1 (sliding window):\n"
+      result << "  co-occurrence pairs: "
+      result << line_stats.pairs_stored
+      result << "\n"
+      result << "  neighbors computed:  "
+      result << line_stats.neighbors_computed
+      result << "\n"
+      result << "  time:                "
+      result << line_stats.elapsed_ms
+      result << "ms\n\n"
+    end
+
+    if heir_stats = stats.heir_stats
+      result << "cooc.heir.v1 (hierarchical):\n"
+      result << "  co-occurrence pairs: "
+      result << heir_stats.pairs_stored
+      result << "\n"
+      result << "  neighbors computed:  "
+      result << heir_stats.neighbors_computed
+      result << "\n"
+      result << "  time:                "
+      result << heir_stats.elapsed_ms
+      result << "ms\n\n"
+    end
+
+    result << "Total time: "
+    result << stats.total_elapsed_ms
+    result << "ms\n"
+
+    result.to_s
+  end
+
+  # Formats token neighbors for human reading.
+  def self.format_neighbors(token : String, neighbors : Array({String, Float64}), model : String = "blend") : String
+    result = String::Builder.new
+
+    result << "Neighbors for '"
+    result << token
+    result << "' (model: "
+    result << model
+    result << "):\n\n"
+
+    neighbors.each_with_index do |(neighbor, similarity), idx|
+      result << sprintf("%3d. ", idx + 1)
+      result << neighbor.ljust(30)
+      result << sprintf("%.4f", similarity)
+      result << "\n"
+    end
+
+    result.to_s
   end
 
   private def self.truncate(str : String, max_len : Int32) : String

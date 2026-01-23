@@ -5,6 +5,8 @@ require "./cli/grep_formatter"
 require "./cli/index_command"
 require "./cli/query_command"
 require "./cli/mark_command"
+require "./cli/train_command"
+require "./cli/neighbors_command"
 
 module Xerp::CLI
   VERSION = Xerp::VERSION
@@ -20,6 +22,10 @@ module Xerp::CLI
       "rebuild": {
         "type": "boolean",
         "description": "Force full reindex"
+      },
+      "train": {
+        "type": "boolean",
+        "description": "Train semantic vectors after indexing"
       },
       "json": {
         "type": "boolean",
@@ -130,6 +136,94 @@ module Xerp::CLI
     "required": ["result_id"]
   })
 
+  TRAIN_SCHEMA = %({
+    "type": "object",
+    "description": "Train semantic token vectors",
+    "properties": {
+      "root": {
+        "type": "string",
+        "description": "Workspace root directory"
+      },
+      "model": {
+        "type": "string",
+        "description": "Model to train: line (sliding window), heir (hierarchical), or all (both)"
+      },
+      "window": {
+        "type": "integer",
+        "default": 5,
+        "description": "Context window size (±N tokens)"
+      },
+      "min-count": {
+        "type": "integer",
+        "default": 3,
+        "description": "Minimum co-occurrence count"
+      },
+      "top-neighbors": {
+        "type": "integer",
+        "default": 32,
+        "description": "Max neighbors per token"
+      },
+      "clear": {
+        "type": "boolean",
+        "description": "Clear existing vectors without retraining"
+      },
+      "json": {
+        "type": "boolean",
+        "description": "Output stats as JSON"
+      }
+    }
+  })
+
+  NEIGHBORS_SCHEMA = %({
+    "type": "object",
+    "description": "Show nearest neighbors for a token",
+    "positional": ["token"],
+    "properties": {
+      "token": {
+        "type": "string",
+        "description": "Token to look up"
+      },
+      "root": {
+        "type": "string",
+        "description": "Workspace root directory"
+      },
+      "model": {
+        "type": "string",
+        "description": "Model to query: line, heir, or blend (both with reranking)"
+      },
+      "w-line": {
+        "type": "number",
+        "default": 0.6,
+        "description": "Weight for linear model similarity in blend mode"
+      },
+      "w-heir": {
+        "type": "number",
+        "default": 0.4,
+        "description": "Weight for hierarchical model similarity in blend mode"
+      },
+      "w-idf": {
+        "type": "number",
+        "default": 0.1,
+        "description": "Weight for IDF boost in blend mode"
+      },
+      "w-feedback": {
+        "type": "number",
+        "default": 0.2,
+        "description": "Weight for feedback boost in blend mode"
+      },
+      "top": {
+        "type": "integer",
+        "default": 20,
+        "description": "Number of neighbors to show"
+      },
+      "json": {
+        "type": "boolean",
+        "description": "Output as JSON"
+      }
+    },
+    "required": ["token"]
+  })
+
   def self.run(args : Array(String)) : Int32
     # Handle top-level flags before CLJ parsing
     if args.empty? || args == ["help"] || args == ["-h"] || args == ["--help"]
@@ -147,6 +241,8 @@ module Xerp::CLI
     cli.subcommand("query", QUERY_SCHEMA)
     cli.subcommand("q", QUERY_SCHEMA)  # alias
     cli.subcommand("mark", MARK_SCHEMA)
+    cli.subcommand("train", TRAIN_SCHEMA)
+    cli.subcommand("neighbors", NEIGHBORS_SCHEMA)
     cli.default_subcommand("query")
 
     result = cli.parse(args)
@@ -163,6 +259,10 @@ module Xerp::CLI
       QueryCommand.run(result)
     when "mark"
       MarkCommand.run(result)
+    when "train"
+      TrainCommand.run(result)
+    when "neighbors"
+      NeighborsCommand.run(result)
     else
       print_usage
       0
@@ -175,16 +275,21 @@ module Xerp::CLI
     puts "Usage: xerp <command> [options]"
     puts
     puts "Commands:"
-    puts "  index     Index workspace files"
-    puts "  query     Search indexed content (alias: q)"
-    puts "  mark      Record feedback on results"
-    puts "  version   Show version"
-    puts "  help      Show this help"
+    puts "  index      Index workspace files"
+    puts "  query      Search indexed content (alias: q)"
+    puts "  mark       Record feedback on results"
+    puts "  train      Train semantic token vectors"
+    puts "  neighbors  Show nearest neighbors for a token"
+    puts "  version    Show version"
+    puts "  help       Show this help"
     puts
     puts "Examples:"
     puts "  xerp index                    # Index current directory"
+    puts "  xerp index --train            # Index and train vectors"
     puts "  xerp query \"retry backoff\"    # Search for intent"
     puts "  xerp q \"error handling\" --top 5"
     puts "  xerp mark abc123 --useful     # Mark result as useful"
+    puts "  xerp train                    # Train semantic vectors"
+    puts "  xerp neighbors retry --top 10 # Show similar tokens"
   end
 end
