@@ -202,6 +202,19 @@ module Xerp::CLI::HumanFormatter
       result << "ms\n\n"
     end
 
+    if scope_stats = stats.scope_stats
+      result << "cooc.scope.v1 (shallow outline):\n"
+      result << "  co-occurrence pairs: "
+      result << scope_stats.pairs_stored
+      result << "\n"
+      result << "  neighbors computed:  "
+      result << scope_stats.neighbors_computed
+      result << "\n"
+      result << "  time:                "
+      result << scope_stats.elapsed_ms
+      result << "ms\n\n"
+    end
+
     result << "Total time: "
     result << stats.total_elapsed_ms
     result << "ms\n"

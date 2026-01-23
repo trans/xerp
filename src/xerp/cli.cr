@@ -146,7 +146,7 @@ module Xerp::CLI
       },
       "model": {
         "type": "string",
-        "description": "Model to train: line (sliding window), heir (hierarchical), or all (both)"
+        "description": "Model to train: line, heir, scope, or all"
       },
       "window": {
         "type": "integer",
@@ -189,7 +189,7 @@ module Xerp::CLI
       },
       "model": {
         "type": "string",
-        "description": "Model to query: line, heir, or blend (both with reranking)"
+        "description": "Model to query: line, heir, scope, or blend (line+heir with reranking)"
       },
       "w-line": {
         "type": "number",

@@ -30,9 +30,10 @@ module Xerp::CLI
       model = case model_arg
               when "line"  then Vectors::Cooccurrence::MODEL_LINE
               when "heir"  then Vectors::Cooccurrence::MODEL_HEIR
-              when "blend" then nil  # Query both and blend
+              when "scope" then Vectors::Cooccurrence::MODEL_SCOPE
+              when "blend" then nil  # Query line + heir and blend
               else
-                STDERR.puts "Error: Invalid model '#{model_arg}'. Use: line, heir, or blend"
+                STDERR.puts "Error: Invalid model '#{model_arg}'. Use: line, heir, scope, or blend"
                 return 1
               end
 

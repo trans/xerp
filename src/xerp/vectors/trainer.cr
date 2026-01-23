@@ -20,16 +20,18 @@ module Xerp::Vectors
   struct MultiModelTrainStats
     getter line_stats : TrainStats?
     getter heir_stats : TrainStats?
+    getter scope_stats : TrainStats?
     getter total_elapsed_ms : Int64
 
-    def initialize(@line_stats, @heir_stats, @total_elapsed_ms)
+    def initialize(@line_stats, @heir_stats, @scope_stats, @total_elapsed_ms)
     end
   end
 
   # Coordinates token vector training for semantic expansion.
-  # v0.2 uses co-occurrence based vectors with two models:
-  # - cooc.line.v1: linear sliding-window co-occurrence
-  # - cooc.heir.v1: hierarchical block signature context
+  # v0.2 uses co-occurrence based vectors with three models:
+  # - cooc.line.v1: linear sliding-window co-occurrence (within blocks)
+  # - cooc.heir.v1: hierarchical block context (header↔child relationships)
+  # - cooc.scope.v1: shallow scope outline (header + direct children + footer)
   class Trainer
     @config : Config
     @database : Store::Database
@@ -48,9 +50,10 @@ module Xerp::Vectors
 
       line_stats = nil
       heir_stats = nil
+      scope_stats = nil
 
       @database.with_migrated_connection do |db|
-        models_to_train = model ? [model] : [Cooccurrence::MODEL_LINE, Cooccurrence::MODEL_HEIR]
+        models_to_train = model ? [model] : [Cooccurrence::MODEL_LINE, Cooccurrence::MODEL_HEIR, Cooccurrence::MODEL_SCOPE]
 
         models_to_train.each do |m|
           model_start = Time.monotonic
@@ -69,6 +72,8 @@ module Xerp::Vectors
             line_stats = stats
           when Cooccurrence::MODEL_HEIR
             heir_stats = stats
+          when Cooccurrence::MODEL_SCOPE
+            scope_stats = stats
           end
 
           # Store training metadata for this model
@@ -77,7 +82,7 @@ module Xerp::Vectors
       end
 
       total_elapsed = (Time.monotonic - start_time).total_milliseconds.to_i64
-      MultiModelTrainStats.new(line_stats, heir_stats, total_elapsed)
+      MultiModelTrainStats.new(line_stats, heir_stats, scope_stats, total_elapsed)
     end
 
     # Clears vector training data.

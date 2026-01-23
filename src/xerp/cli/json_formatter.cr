@@ -124,6 +124,16 @@ module Xerp::CLI::JsonFormatter
             end
           end
         end
+
+        if scope_stats = stats.scope_stats
+          json.field "cooc.scope.v1" do
+            json.object do
+              json.field "pairs_stored", scope_stats.pairs_stored
+              json.field "neighbors_computed", scope_stats.neighbors_computed
+              json.field "elapsed_ms", scope_stats.elapsed_ms
+            end
+          end
+        end
       end
     end
   end
