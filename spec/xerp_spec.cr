@@ -510,4 +510,100 @@ describe Xerp::Query::Engine do
       FileUtils.rm_rf(test_dir)
     end
   end
+
+  it "ranks concentrated hits higher (scope scoring)" do
+    test_dir = "/tmp/xerp_scope_test_#{Random::Secure.hex(4)}"
+    Dir.mkdir_p(test_dir)
+
+    begin
+      # File with concentrated hits in one function
+      File.write("#{test_dir}/concentrated.cr", <<-CODE
+      def retry_with_backoff
+        # retry logic with backoff
+        retry_count = 0
+        backoff_delay = 1
+        while retry_count < 3
+          sleep(backoff_delay)
+          retry_count += 1
+          backoff_delay *= 2
+        end
+      end
+
+      def other_function
+        puts "unrelated"
+      end
+      CODE
+      )
+
+      # File with scattered hits
+      File.write("#{test_dir}/scattered.cr", <<-CODE
+      def function_one
+        retry_attempt = 1
+        do_something
+      end
+
+      def function_two
+        do_other
+      end
+
+      def function_three
+        backoff_time = 5
+        wait
+      end
+      CODE
+      )
+
+      config = Xerp::Config.new(test_dir)
+      indexer = Xerp::Index::Indexer.new(config)
+      indexer.index_all
+
+      engine = Xerp::Query::Engine.new(config)
+      response = engine.run("retry backoff")
+
+      # Should find results
+      response.results.size.should be > 0
+
+      # First result should be from concentrated.cr (higher salience due to concentration)
+      response.results.first.file_path.should eq("concentrated.cr")
+    ensure
+      FileUtils.rm_rf(test_dir)
+    end
+  end
+end
+
+describe Xerp::Index::BlocksBuilder do
+  it "computes token counts per block" do
+    test_dir = "/tmp/xerp_token_count_#{Random::Secure.hex(4)}"
+    Dir.mkdir_p(test_dir)
+
+    begin
+      File.write("#{test_dir}/code.cr", <<-CODE
+      def foo
+        bar = 1
+        baz = 2
+      end
+      CODE
+      )
+
+      config = Xerp::Config.new(test_dir)
+      indexer = Xerp::Index::Indexer.new(config)
+      indexer.index_all
+
+      database = Xerp::Store::Database.new(config.db_path)
+      database.with_connection do |db|
+        blocks = Xerp::Store::Statements.select_blocks_by_file(db, 1)
+        blocks.size.should be > 0
+
+        # All blocks should have token_count >= 0
+        blocks.each do |block|
+          block.token_count.should be >= 0
+        end
+
+        # At least one block should have tokens
+        blocks.any? { |b| b.token_count > 0 }.should be_true
+      end
+    ensure
+      FileUtils.rm_rf(test_dir)
+    end
+  end
 end
