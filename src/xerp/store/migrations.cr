@@ -244,8 +244,9 @@ module Xerp::Store
       db.exec "DROP TABLE token_cooccurrence"
       db.exec "ALTER TABLE token_cooccurrence_new RENAME TO token_cooccurrence"
 
+      # Index for lookups by token_id (since PK is model-first)
       db.exec <<-SQL
-        CREATE INDEX idx_cooccurrence_model ON token_cooccurrence(model)
+        CREATE INDEX idx_cooccurrence_token ON token_cooccurrence(token_id)
       SQL
 
       # Recreate token_neighbors with model column
