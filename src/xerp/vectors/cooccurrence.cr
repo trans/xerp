@@ -5,12 +5,13 @@ module Xerp::Vectors
   # Builds token co-occurrence counts from the indexed corpus.
   #
   # Models:
-  #   MODEL_LINE: (TODO) true linear co-occurrence - tokens on same/adjacent lines
-  #   MODEL_HEIR: virtual sequences of [reversed_ancestor_headers..., line_tokens]
-  #   MODEL_SCOPE: shallow scope outline - header + direct children + footer
+  #   MODEL_LINE:  Traditional linear - sliding window over whole file in text order
+  #   MODEL_HEIR:  Hierarchical - virtual sequences [reversed_ancestor_headers..., line_tokens]
+  #   MODEL_SCOPE: Scope-aware - shallow outline (header + direct children + footer per block)
   #
-  # MODEL_LINE currently does block-based co-occurrence (same as old approach).
-  # TODO: Make MODEL_LINE truly linear (line-based, no block nesting).
+  # SCOPE is recommended for code - respects logical structure without crossing scope boundaries.
+  # LINE is traditional word2vec-style co-occurrence (whole document, one pass).
+  # HEIR captures header↔child relationships explicitly.
   module Cooccurrence
     # Model identifiers
     MODEL_LINE  = "cooc.line.v1"
@@ -72,13 +73,8 @@ module Xerp::Vectors
       pairs_count = 0_i64
 
       if model == MODEL_LINE
-        # Linear model: sliding window co-occurrence within blocks
-        # TODO: Make this truly linear (line-based proximity)
-        blocks.each do |block|
-          tokens_in_block = extract_tokens_in_block(postings, block)
-          next if tokens_in_block.empty?
-          pairs_count += count_window_pairs(db, model, tokens_in_block, window_size)
-        end
+        # Linear model: traditional whole-document sliding window
+        pairs_count += count_linear_pairs(db, model, postings, window_size)
       elsif model == MODEL_HEIR
         # Hierarchical model: virtual sequences with ancestor headers
         pairs_count += count_hierarchical_pairs_new(db, model, file_id, blocks, postings, window_size)
@@ -90,17 +86,38 @@ module Xerp::Vectors
       pairs_count
     end
 
-    # Extracts token IDs within a block's line range.
-    private def self.extract_tokens_in_block(postings : Array(FilePosting), block : FileBlockWithParent) : Array(Int64)
-      tokens = [] of Int64
-      postings.each do |posting|
-        posting.lines.each do |line|
-          if line >= block.start_line && line <= block.end_line
-            tokens << posting.token_id
-          end
-        end
+    # Counts traditional linear co-occurrences over the whole file.
+    # Tokens are collected in line order and sliding window runs once.
+    private def self.count_linear_pairs(db : DB::Database,
+                                        model : String,
+                                        postings : Array(FilePosting),
+                                        window_size : Int32) : Int64
+      # Group postings by line, then sort by line number
+      postings_by_line = group_postings_by_line(postings)
+      sorted_lines = postings_by_line.keys.sort
+
+      # Collect all tokens in text order
+      all_tokens = [] of Int64
+      sorted_lines.each do |line_num|
+        all_tokens.concat(postings_by_line[line_num])
       end
-      tokens
+
+      return 0_i64 if all_tokens.empty?
+
+      # Run sliding window once over the whole file
+      counts = Hash({Int64, Int64}, Float64).new(0.0)
+      count_window_pairs_weighted(all_tokens, window_size, 1.0, counts)
+
+      # Upsert all counts to database
+      pairs = 0_i64
+      counts.each do |(token_id, context_id), weight|
+        count = Math.max(1, weight.round.to_i32)
+        upsert_cooccurrence(db, model, token_id, context_id, count)
+        upsert_cooccurrence(db, model, context_id, token_id, count)
+        pairs += 1
+      end
+
+      pairs
     end
 
     # Counts hierarchical co-occurrences using virtual sequences.
