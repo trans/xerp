@@ -217,6 +217,11 @@ module Xerp::CLI
         "default": 20,
         "description": "Number of neighbors to show"
       },
+      "max-df": {
+        "type": "number",
+        "default": 40,
+        "description": "Max df% to include (e.g., 40 = filter terms in >40% of files)"
+      },
       "json": {
         "type": "boolean",
         "description": "Output as JSON"
@@ -248,10 +253,10 @@ module Xerp::CLI
         "default": 20,
         "description": "Number of blocks to analyze"
       },
-      "min-idf": {
+      "max-df": {
         "type": "number",
-        "default": 0.5,
-        "description": "Minimum IDF threshold (filters common terms)"
+        "default": 40,
+        "description": "Max df% to include (e.g., 40 = filter terms in >40% of files)"
       },
       "json": {
         "type": "boolean",

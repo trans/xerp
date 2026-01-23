@@ -19,6 +19,7 @@ module Xerp::CLI
       w_heir = result["w-heir"]?.try(&.as_f) || Query::Expansion::DEFAULT_W_HEIR
       w_idf = result["w-idf"]?.try(&.as_f) || Query::Expansion::DEFAULT_W_IDF
       w_feedback = result["w-feedback"]?.try(&.as_f) || Query::Expansion::DEFAULT_W_FEEDBACK
+      max_df_percent = result["max-df"]?.try(&.as_f) || Query::Expansion::DEFAULT_MAX_DF_PERCENT
       json_output = result["json"]?.try(&.as_bool) || false
 
       if token.empty?
@@ -83,7 +84,7 @@ module Xerp::CLI
             end
 
             blended = Query::Expansion.blend_neighbors(db, token_row.id, top_k, 0.0,
-                                                       has_line, has_heir, weights)
+                                                       has_line, has_heir, weights, max_df_percent)
             neighbors = blended.map { |n| {n[:token], n[:score]} }
           end
         end

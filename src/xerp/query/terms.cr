@@ -29,9 +29,9 @@ module Xerp::Query::Terms
 
   # Options for term extraction.
   struct TermsOptions
-    getter top_k_blocks : Int32      # How many blocks to analyze
-    getter top_k_terms : Int32       # How many terms to return
-    getter min_idf : Float64         # Minimum IDF to include (filters boilerplate)
+    getter top_k_blocks : Int32       # How many blocks to analyze
+    getter top_k_terms : Int32        # How many terms to return
+    getter max_df_percent : Float64   # Max df% to include (filters boilerplate, e.g., 40 = filter terms in >40% of files)
     getter query_term_boost : Float64 # Boost for direct query matches
     getter file_filter : Regex?
     getter file_type_filter : String?
@@ -39,7 +39,7 @@ module Xerp::Query::Terms
     def initialize(
       @top_k_blocks : Int32 = 20,
       @top_k_terms : Int32 = 30,
-      @min_idf : Float64 = 0.5,
+      @max_df_percent : Float64 = 40.0,
       @query_term_boost : Float64 = 2.0,
       @file_filter : Regex? = nil,
       @file_type_filter : String? = nil
@@ -133,9 +133,11 @@ module Xerp::Query::Terms
 
       is_query_term = query_token_ids.includes?(token_id)
 
-      # Filter by min_idf unless it's a query term
+      # Filter by max_df_percent unless it's a query term
+      # If term appears in more than X% of files, skip it
       unless is_query_term
-        next if idf < opts.min_idf
+        df_percent = (df / total_files) * 100.0
+        next if df_percent > opts.max_df_percent
       end
 
       # Compute final salience

@@ -51,7 +51,7 @@ require "./xerp/feedback/marker"
 require "./xerp/cli"
 
 module Xerp
-  VERSION = "0.1.1"
+  VERSION = "0.1.2"
 end
 
 # Entry point for CLI - only run when not in spec mode

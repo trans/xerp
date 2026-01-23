@@ -5,8 +5,9 @@ require "./types"
 
 module Xerp::Query::Expansion
   # Default expansion parameters
-  DEFAULT_TOP_K_PER_TOKEN = 8   # Max neighbors per query token
+  DEFAULT_TOP_K_PER_TOKEN = 8    # Max neighbors per query token
   DEFAULT_MIN_SIMILARITY  = 0.25 # Minimum similarity threshold
+  DEFAULT_MAX_DF_PERCENT  = 40.0 # Filter terms in >40% of files
   KIND_ALLOWLIST          = Set{Tokenize::TokenKind::Ident, Tokenize::TokenKind::Word, Tokenize::TokenKind::Compound}
 
   # Default blend weights for union+rerank
@@ -47,7 +48,8 @@ module Xerp::Query::Expansion
   def self.expand(db : DB::Database, query_tokens : Array(String),
                   top_k : Int32 = DEFAULT_TOP_K_PER_TOKEN,
                   min_similarity : Float64 = DEFAULT_MIN_SIMILARITY,
-                  weights : BlendWeights = BlendWeights.new) : Hash(String, Array(ExpandedToken))
+                  weights : BlendWeights = BlendWeights.new,
+                  max_df_percent : Float64 = DEFAULT_MAX_DF_PERCENT) : Hash(String, Array(ExpandedToken))
     result = Hash(String, Array(ExpandedToken)).new
 
     # Check which models have been trained
@@ -74,7 +76,7 @@ module Xerp::Query::Expansion
         # Add semantic neighbors if any model is available
         if has_line || has_heir
           neighbors = blend_neighbors(db, token_row.id, top_k, min_similarity,
-                                      has_line, has_heir, weights)
+                                      has_line, has_heir, weights, max_df_percent)
           neighbors.each do |neighbor|
             expansions << ExpandedToken.new(
               original: token,
@@ -103,7 +105,7 @@ module Xerp::Query::Expansion
             # Add semantic neighbors for lowercase match
             if has_line || has_heir
               neighbors = blend_neighbors(db, lower_row.id, top_k, min_similarity,
-                                          has_line, has_heir, weights)
+                                          has_line, has_heir, weights, max_df_percent)
               neighbors.each do |neighbor|
                 # Adjust score to account for case mismatch penalty
                 expansions << ExpandedToken.new(
@@ -151,7 +153,8 @@ module Xerp::Query::Expansion
   def self.blend_neighbors(db : DB::Database, token_id : Int64,
                            top_k : Int32, min_similarity : Float64,
                            has_line : Bool, has_heir : Bool,
-                           weights : BlendWeights) : Array(NamedTuple(token: String, token_id: Int64, score: Float64, kind: Tokenize::TokenKind))
+                           weights : BlendWeights,
+                           max_df_percent : Float64 = DEFAULT_MAX_DF_PERCENT) : Array(NamedTuple(token: String, token_id: Int64, score: Float64, kind: Tokenize::TokenKind))
     # Collect candidates from both models
     # token_id => {s_line, s_heir, token, kind, df}
     candidates = Hash(Int64, {Float64, Float64, String, Tokenize::TokenKind, Int32}).new
@@ -188,16 +191,14 @@ module Xerp::Query::Expansion
     # Compute total file count for IDF normalization
     total_files = Math.max(Store::Statements.file_count(db).to_f64, 1.0)
 
-    # Minimum IDF threshold to filter boilerplate (terms appearing in >40% of files)
-    min_idf = 0.9
-
     # Rerank candidates
     scored = candidates.compact_map do |tid, (s_line, s_heir, token, kind, df)|
-      # Compute IDF: log((N+1)/(df+1))
-      idf = Math.log((total_files + 1.0) / (df.to_f64 + 1.0))
+      # Filter by max_df_percent (e.g., 40 = filter terms in >40% of files)
+      df_percent = (df.to_f64 / total_files) * 100.0
+      next nil if df_percent > max_df_percent
 
-      # Filter out low-IDF (common) terms
-      next nil if idf < min_idf
+      # Compute IDF: ln((N+1)/(df+1)) + 1 (matches DESIGN02-00 formula)
+      idf = Math.log((total_files + 1.0) / (df.to_f64 + 1.0)) + 1.0
 
       # Normalize IDF to 0-1 range (assuming max IDF around 10)
       idf_normalized = Math.min(1.0, idf / 10.0)

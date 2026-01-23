@@ -15,7 +15,7 @@ module Xerp::CLI
       query = result["query"]?.try(&.as_s) || ""
       top_blocks = result["top-blocks"]?.try(&.as_i) || 20
       top_terms = result["top"]?.try(&.as_i) || 30
-      min_idf = result["min-idf"]?.try(&.as_f) || 0.5
+      max_df_percent = result["max-df"]?.try(&.as_f) || 40.0
       json_output = result["json"]?.try(&.as_bool) || false
 
       if query.empty?
@@ -53,7 +53,7 @@ module Xerp::CLI
           opts = Query::Terms::TermsOptions.new(
             top_k_blocks: top_blocks,
             top_k_terms: top_terms,
-            min_idf: min_idf
+            max_df_percent: max_df_percent
           )
           terms = Query::Terms.extract(db, query_tokens, expanded, opts)
 

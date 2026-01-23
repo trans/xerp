@@ -75,6 +75,56 @@ xerp query "QUERY" [OPTIONS]
   --grep               Compact grep-like output
 ```
 
+### Semantic vectors
+
+Train token co-occurrence vectors for query expansion:
+
+```sh
+xerp index --train         # index and train in one step
+xerp train                  # train vectors on existing index
+xerp train --model line     # train only sliding-window model
+xerp train --model heir     # train only hierarchical model
+```
+
+### Explore token relationships
+
+```sh
+xerp neighbors retry --top 10
+```
+
+Output:
+```
+Neighbors for 'retry' (model: blend):
+
+  1. max                           0.5225
+  2. connection                    0.5001
+  3. pool                          0.4903
+  4. attempts                      0.3307
+```
+
+### Extract salient terms
+
+Find vocabulary related to a query:
+
+```sh
+xerp terms "error handling" --top 20
+```
+
+Output:
+```
+xerp terms: "error handling" (20 terms, 43ms)
+
+ rescue      7105.271
+ exception   5338.703
+ raise       4846.238
+*error       3864.714
+*handling    3503.015
+
+* = query term
+```
+
+Use `--max-df 40` to filter terms appearing in more than 40% of files (default).
+
 ### Feedback
 
 Mark results to help improve future searches:
