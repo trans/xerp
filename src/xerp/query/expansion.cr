@@ -188,10 +188,17 @@ module Xerp::Query::Expansion
     # Compute total file count for IDF normalization
     total_files = Math.max(Store::Statements.file_count(db).to_f64, 1.0)
 
+    # Minimum IDF threshold to filter boilerplate (terms appearing in >40% of files)
+    min_idf = 0.9
+
     # Rerank candidates
-    scored = candidates.map do |tid, (s_line, s_heir, token, kind, df)|
+    scored = candidates.compact_map do |tid, (s_line, s_heir, token, kind, df)|
       # Compute IDF: log((N+1)/(df+1))
       idf = Math.log((total_files + 1.0) / (df.to_f64 + 1.0))
+
+      # Filter out low-IDF (common) terms
+      next nil if idf < min_idf
+
       # Normalize IDF to 0-1 range (assuming max IDF around 10)
       idf_normalized = Math.min(1.0, idf / 10.0)
 
