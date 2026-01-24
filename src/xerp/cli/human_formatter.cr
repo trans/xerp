@@ -276,6 +276,43 @@ module Xerp::CLI::HumanFormatter
     output.to_s
   end
 
+  # Formats headers listing for human reading.
+  def self.format_headers(result : HeadersCommand::HeadersResult) : String
+    output = String::Builder.new
+
+    output << "xerp headers: "
+    output << result.block_count
+    output << " blocks in "
+    output << result.file_count
+    output << " files ("
+    output << result.timing_ms
+    output << "ms)\n"
+
+    if result.entries.empty?
+      output << "\nNo headers found.\n"
+      return output.to_s
+    end
+
+    current_file = ""
+    result.entries.each do |entry|
+      # Print file header when file changes
+      if entry.file_path != current_file
+        output << "\n" unless current_file.empty?
+        output << entry.file_path
+        output << "\n"
+        current_file = entry.file_path
+      end
+
+      # Print line number and text (preserving original indentation)
+      output << entry.line_num.to_s.rjust(4)
+      output << "| "
+      output << entry.text.rstrip
+      output << "\n"
+    end
+
+    output.to_s
+  end
+
   private def self.truncate(str : String, max_len : Int32) : String
     if str.size <= max_len
       str

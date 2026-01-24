@@ -7,6 +7,7 @@ require "./cli/query_command"
 require "./cli/mark_command"
 require "./cli/train_command"
 require "./cli/terms_command"
+require "./cli/headers_command"
 
 module Xerp::CLI
   VERSION = Xerp::VERSION
@@ -214,6 +215,30 @@ module Xerp::CLI
     "required": ["query"]
   })
 
+  HEADERS_SCHEMA = %({
+    "type": "object",
+    "description": "List block headers from indexed files",
+    "properties": {
+      "root": {
+        "type": "string",
+        "description": "Workspace root directory"
+      },
+      "file": {
+        "type": "string",
+        "description": "Filter by file path glob (e.g., src/**/*.cr)"
+      },
+      "level": {
+        "type": "integer",
+        "default": 2,
+        "description": "Number of levels to show (default: 2)"
+      },
+      "json": {
+        "type": "boolean",
+        "description": "Output as JSON"
+      }
+    }
+  })
+
   def self.run(args : Array(String)) : Int32
     # Handle top-level flags before CLJ parsing
     if args.empty? || args == ["help"] || args == ["-h"] || args == ["--help"]
@@ -233,6 +258,7 @@ module Xerp::CLI
     cli.subcommand("mark", MARK_SCHEMA)
     cli.subcommand("train", TRAIN_SCHEMA)
     cli.subcommand("terms", TERMS_SCHEMA)
+    cli.subcommand("headers", HEADERS_SCHEMA)
     cli.default_subcommand("query")
 
     result = cli.parse(args)
@@ -253,6 +279,8 @@ module Xerp::CLI
       TrainCommand.run(result)
     when "terms"
       TermsCommand.run(result)
+    when "headers"
+      HeadersCommand.run(result)
     else
       print_usage
       0
@@ -268,6 +296,7 @@ module Xerp::CLI
     puts "  index    Index workspace files"
     puts "  query    Search indexed content (alias: q)"
     puts "  terms    Find related terms (scope, vector, or combined)"
+    puts "  headers  List block headers from indexed files"
     puts "  mark     Record feedback on results"
     puts "  train    Train semantic token vectors"
     puts "  version  Show version"
@@ -282,6 +311,8 @@ module Xerp::CLI
     puts "  xerp terms retry --source line    # Line vector model"
     puts "  xerp terms retry --source block   # Block vector model"
     puts "  xerp terms retry --source vector  # Both line+block models"
+    puts "  xerp headers                      # List all block headers"
+    puts "  xerp headers --file 'src/*.cr'    # Filter by file pattern"
     puts "  xerp mark abc123 --useful         # Mark result as useful"
   end
 end

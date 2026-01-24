@@ -181,6 +181,36 @@ module Xerp::CLI::JsonFormatter
     end
   end
 
+  # Formats headers listing as JSON (pretty-printed).
+  def self.format_headers(result : HeadersCommand::HeadersResult) : String
+    JSON.build(indent: "  ") do |json|
+      json.object do
+        json.field "block_count", result.block_count
+        json.field "file_count", result.file_count
+        json.field "timing_ms", result.timing_ms
+
+        json.field "files" do
+          json.object do
+            current_file = ""
+            result.entries.group_by(&.file_path).each do |file_path, entries|
+              json.field file_path do
+                json.array do
+                  entries.each do |entry|
+                    json.object do
+                      json.field "line", entry.line_num
+                      json.field "level", entry.level
+                      json.field "text", entry.text.strip
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
   private def self.format_result(json : JSON::Builder, result : Query::QueryResult) : Nil
     json.object do
       json.field "result_id", result.result_id
