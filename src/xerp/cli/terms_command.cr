@@ -1,4 +1,4 @@
-require "clj"
+require "jargon"
 require "../config"
 require "../store/db"
 require "../tokenize/tokenizer"
@@ -9,7 +9,7 @@ require "./human_formatter"
 
 module Xerp::CLI
   module TermsCommand
-    def self.run(result : CLJ::Result) : Int32
+    def self.run(result : Jargon::Result) : Int32
       root = result["root"]?.try(&.as_s) || Dir.current
       root = File.expand_path(root)
       query = result["query"]?.try(&.as_s) || ""

@@ -1,4 +1,4 @@
-require "clj"
+require "jargon"
 require "../config"
 require "../index/indexer"
 require "../vectors/trainer"
@@ -7,7 +7,7 @@ require "./human_formatter"
 
 module Xerp::CLI
   module IndexCommand
-    def self.run(result : CLJ::Result) : Int32
+    def self.run(result : Jargon::Result) : Int32
       root = result["root"]?.try(&.as_s) || Dir.current
       root = File.expand_path(root)
       rebuild = result["rebuild"]?.try(&.as_bool) || false

@@ -15,7 +15,7 @@ license: MIT
 dependencies:
   sqlite3:
     github: crystal-lang/crystal-sqlite3
-  clj:
-    github: trans/clj
+  jargon:
+    github: trans/jargon
   ignoreme:
     github: trans/ignoreme

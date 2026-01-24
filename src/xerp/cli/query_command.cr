@@ -1,4 +1,4 @@
-require "clj"
+require "jargon"
 require "../config"
 require "../query/types"
 require "../query/query_engine"
@@ -8,7 +8,7 @@ require "./grep_formatter"
 
 module Xerp::CLI
   module QueryCommand
-    def self.run(result : CLJ::Result) : Int32
+    def self.run(result : Jargon::Result) : Int32
       root = result["root"]?.try(&.as_s) || Dir.current
       root = File.expand_path(root)
 

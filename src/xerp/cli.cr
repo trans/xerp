@@ -1,4 +1,4 @@
-require "clj"
+require "jargon"
 require "./cli/json_formatter"
 require "./cli/human_formatter"
 require "./cli/grep_formatter"
@@ -240,7 +240,7 @@ module Xerp::CLI
   })
 
   def self.run(args : Array(String)) : Int32
-    # Handle top-level flags before CLJ parsing
+    # Handle top-level flags before Jargon parsing
     if args.empty? || args == ["help"] || args == ["-h"] || args == ["--help"]
       print_usage
       return 0
@@ -251,7 +251,7 @@ module Xerp::CLI
       return 0
     end
 
-    cli = CLJ.new("xerp")
+    cli = Jargon.new("xerp")
     cli.subcommand("index", INDEX_SCHEMA)
     cli.subcommand("query", QUERY_SCHEMA)
     cli.subcommand("q", QUERY_SCHEMA)  # alias

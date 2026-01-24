@@ -1,16 +1,16 @@
 version: 2.0
 shards:
-  clj:
-    git: https://github.com/trans/clj.git
-    version: 0.1.0
-
   db:
     git: https://github.com/crystal-lang/crystal-db.git
     version: 0.14.0
 
   ignoreme:
     git: https://github.com/trans/ignoreme.git
-    version: 0.2.0
+    version: 0.3.0
+
+  jargon:
+    git: https://github.com/trans/jargon.git
+    version: 0.3.0
 
   sqlite3:
     git: https://github.com/crystal-lang/crystal-sqlite3.git

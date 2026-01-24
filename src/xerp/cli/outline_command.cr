@@ -24,7 +24,7 @@ module Xerp::CLI
       end
     end
 
-    def self.run(result : CLJ::Result) : Int32
+    def self.run(result : Jargon::Result) : Int32
       start_time = Time.monotonic
 
       root = result["root"]?.try(&.as_s) || Dir.current

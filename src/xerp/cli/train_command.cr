@@ -1,4 +1,4 @@
-require "clj"
+require "jargon"
 require "../config"
 require "../vectors/trainer"
 require "../vectors/cooccurrence"
@@ -7,7 +7,7 @@ require "./human_formatter"
 
 module Xerp::CLI
   module TrainCommand
-    def self.run(result : CLJ::Result) : Int32
+    def self.run(result : Jargon::Result) : Int32
       root = result["root"]?.try(&.as_s) || Dir.current
       root = File.expand_path(root)
       model_arg = result["model"]?.try(&.as_s) || "all"
