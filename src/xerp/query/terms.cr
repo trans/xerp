@@ -9,11 +9,11 @@ require "./types"
 module Xerp::Query::Terms
   # Source for term extraction
   enum Source
-    Blocks   # From matching blocks (query-time)
+    Scope    # From matching scopes (query-time salience)
     Line     # From line vector model only
-    Scope    # From scope vector model only
-    Vector   # From both vector models (line + scope)
-    Combined # RRF of blocks + vectors
+    Block    # From block vector model only
+    Vector   # From both vector models (line + block)
+    Combined # RRF of scope + vectors
   end
 
   # A term with its computed salience score.
@@ -24,7 +24,7 @@ module Xerp::Query::Terms
     getter is_query_term : Bool
     getter source : Source
 
-    def initialize(@term, @token_id, @salience, @is_query_term, @source = Source::Blocks)
+    def initialize(@term, @token_id, @salience, @is_query_term, @source = Source::Scope)
     end
   end
 
@@ -35,7 +35,7 @@ module Xerp::Query::Terms
     getter timing_ms : Int64
     getter source : Source
 
-    def initialize(@query, @terms, @timing_ms, @source = Source::Blocks)
+    def initialize(@query, @terms, @timing_ms, @source = Source::Scope)
     end
   end
 
@@ -69,18 +69,18 @@ module Xerp::Query::Terms
                    expanded_tokens : Hash(String, Array(Expansion::ExpandedToken)),
                    opts : TermsOptions) : Array(SalientTerm)
     case opts.source
-    when Source::Blocks
-      extract_from_blocks(db, query_tokens, expanded_tokens, opts)
+    when Source::Scope
+      extract_from_scope(db, query_tokens, expanded_tokens, opts)
     when Source::Line
       extract_from_model(db, query_tokens, opts, Vectors::Cooccurrence::MODEL_LINE)
-    when Source::Scope
+    when Source::Block
       extract_from_model(db, query_tokens, opts, Vectors::Cooccurrence::MODEL_SCOPE)
     when Source::Vector
       extract_from_vectors(db, query_tokens, opts)
     when Source::Combined
       extract_combined(db, query_tokens, expanded_tokens, opts)
     else
-      extract_from_blocks(db, query_tokens, expanded_tokens, opts)
+      extract_from_scope(db, query_tokens, expanded_tokens, opts)
     end
   end
 
@@ -185,7 +185,7 @@ module Xerp::Query::Terms
     # Determine source enum based on model
     source = case model
              when Vectors::Cooccurrence::MODEL_LINE  then Source::Line
-             when Vectors::Cooccurrence::MODEL_SCOPE then Source::Scope
+             when Vectors::Cooccurrence::MODEL_SCOPE then Source::Block
              else                                         Source::Vector
              end
 
@@ -254,7 +254,7 @@ module Xerp::Query::Terms
                             expanded_tokens : Hash(String, Array(Expansion::ExpandedToken)),
                             opts : TermsOptions) : Array(SalientTerm)
     # Get terms from both sources (already sorted by salience descending)
-    scope_terms = extract_from_blocks(db, query_tokens, expanded_tokens, opts)
+    scope_terms = extract_from_scope(db, query_tokens, expanded_tokens, opts)
     vector_terms = extract_from_vectors(db, query_tokens, opts)
 
     # If one source is empty, return the other
@@ -295,7 +295,7 @@ module Xerp::Query::Terms
 
   # Extracts the most salient terms from blocks matching a query.
   # salience(term) = Σ (block_score × tf(term, block)) × idf(term)
-  def self.extract_from_blocks(db : DB::Database,
+  def self.extract_from_scope(db : DB::Database,
                               query_tokens : Array(String),
                               expanded_tokens : Hash(String, Array(Expansion::ExpandedToken)),
                               opts : TermsOptions) : Array(SalientTerm)
@@ -394,7 +394,7 @@ module Xerp::Query::Terms
         salience *= opts.query_term_boost
       end
 
-      results << SalientTerm.new(term, token_id, salience, is_query_term, Source::Blocks)
+      results << SalientTerm.new(term, token_id, salience, is_query_term, Source::Scope)
     end
 
     # Sort by salience descending

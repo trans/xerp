@@ -248,9 +248,9 @@ module Xerp::CLI::HumanFormatter
     output = String::Builder.new
 
     source_name = case result.source
-                  when Query::Terms::Source::Blocks   then "blocks"
-                  when Query::Terms::Source::Line     then "line"
                   when Query::Terms::Source::Scope    then "scope"
+                  when Query::Terms::Source::Line     then "line"
+                  when Query::Terms::Source::Block    then "block"
                   when Query::Terms::Source::Vector   then "vector"
                   when Query::Terms::Source::Combined then "combined"
                   else                                     "unknown"
