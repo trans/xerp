@@ -39,7 +39,7 @@ module Xerp::Query::Terms
     def initialize(
       @top_k_blocks : Int32 = 20,
       @top_k_terms : Int32 = 30,
-      @max_df_percent : Float64 = 40.0,
+      @max_df_percent : Float64 = 22.0,
       @query_term_boost : Float64 = 2.0,
       @file_filter : Regex? = nil,
       @file_type_filter : String? = nil

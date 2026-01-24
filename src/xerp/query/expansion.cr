@@ -7,7 +7,7 @@ module Xerp::Query::Expansion
   # Default expansion parameters
   DEFAULT_TOP_K_PER_TOKEN = 8    # Max neighbors per query token
   DEFAULT_MIN_SIMILARITY  = 0.25 # Minimum similarity threshold
-  DEFAULT_MAX_DF_PERCENT  = 40.0 # Filter terms in >40% of files
+  DEFAULT_MAX_DF_PERCENT  = 22.0 # Filter terms in >22% of files
   KIND_ALLOWLIST          = Set{Tokenize::TokenKind::Ident, Tokenize::TokenKind::Word, Tokenize::TokenKind::Compound}
 
   # Default blend weights for union+rerank

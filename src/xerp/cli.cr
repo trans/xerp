@@ -219,8 +219,8 @@ module Xerp::CLI
       },
       "max-df": {
         "type": "number",
-        "default": 40,
-        "description": "Max df% to include (e.g., 40 = filter terms in >40% of files)"
+        "default": 22,
+        "description": "Max df% to include (e.g., 22 = filter terms in >22% of files)"
       },
       "json": {
         "type": "boolean",
@@ -255,8 +255,8 @@ module Xerp::CLI
       },
       "max-df": {
         "type": "number",
-        "default": 40,
-        "description": "Max df% to include (e.g., 40 = filter terms in >40% of files)"
+        "default": 22,
+        "description": "Max df% to include (e.g., 22 = filter terms in >22% of files)"
       },
       "json": {
         "type": "boolean",
