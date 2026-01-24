@@ -20,11 +20,10 @@ module Xerp::CLI
       # Map CLI model arg to internal model name
       model = case model_arg
               when "line"  then Vectors::Cooccurrence::MODEL_LINE
-              when "heir"  then Vectors::Cooccurrence::MODEL_HEIR
-              when "scope" then Vectors::Cooccurrence::MODEL_SCOPE
-              when "all"   then nil  # Train all
+              when "block" then Vectors::Cooccurrence::MODEL_SCOPE
+              when "all"   then nil  # Train all (line + block)
               else
-                STDERR.puts "Error: Invalid model '#{model_arg}'. Use: line, heir, scope, or all"
+                STDERR.puts "Error: Invalid model '#{model_arg}'. Use: line, block, or all"
                 return 1
               end
 

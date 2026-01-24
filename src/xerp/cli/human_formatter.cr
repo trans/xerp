@@ -178,7 +178,7 @@ module Xerp::CLI::HumanFormatter
     result << "...\n\n"
 
     if line_stats = stats.line_stats
-      result << "cooc.line.v1 (sliding window):\n"
+      result << "line (textual proximity):\n"
       result << "  co-occurrence pairs: "
       result << line_stats.pairs_stored
       result << "\n"
@@ -190,21 +190,8 @@ module Xerp::CLI::HumanFormatter
       result << "ms\n\n"
     end
 
-    if heir_stats = stats.heir_stats
-      result << "cooc.heir.v1 (hierarchical):\n"
-      result << "  co-occurrence pairs: "
-      result << heir_stats.pairs_stored
-      result << "\n"
-      result << "  neighbors computed:  "
-      result << heir_stats.neighbors_computed
-      result << "\n"
-      result << "  time:                "
-      result << heir_stats.elapsed_ms
-      result << "ms\n\n"
-    end
-
     if scope_stats = stats.scope_stats
-      result << "cooc.scope.v1 (shallow outline):\n"
+      result << "block (structural siblings):\n"
       result << "  co-occurrence pairs: "
       result << scope_stats.pairs_stored
       result << "\n"
@@ -213,6 +200,20 @@ module Xerp::CLI::HumanFormatter
       result << "\n"
       result << "  time:                "
       result << scope_stats.elapsed_ms
+      result << "ms\n\n"
+    end
+
+    # heir is deprecated but show if present (old training data)
+    if heir_stats = stats.heir_stats
+      result << "heir (deprecated):\n"
+      result << "  co-occurrence pairs: "
+      result << heir_stats.pairs_stored
+      result << "\n"
+      result << "  neighbors computed:  "
+      result << heir_stats.neighbors_computed
+      result << "\n"
+      result << "  time:                "
+      result << heir_stats.elapsed_ms
       result << "ms\n\n"
     end
 

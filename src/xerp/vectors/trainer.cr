@@ -53,7 +53,8 @@ module Xerp::Vectors
       scope_stats = nil
 
       @database.with_migrated_connection do |db|
-        models_to_train = model ? [model] : [Cooccurrence::MODEL_LINE, Cooccurrence::MODEL_HEIR, Cooccurrence::MODEL_SCOPE]
+        # Default to line + scope (heir is deprecated)
+        models_to_train = model ? [model] : [Cooccurrence::MODEL_LINE, Cooccurrence::MODEL_SCOPE]
 
         models_to_train.each do |m|
           model_start = Time.monotonic

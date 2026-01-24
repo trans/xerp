@@ -146,7 +146,7 @@ module Xerp::CLI
       },
       "model": {
         "type": "string",
-        "description": "Model to train: line, heir, scope, or all"
+        "description": "Model to train: line, block, or all"
       },
       "window": {
         "type": "integer",

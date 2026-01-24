@@ -107,7 +107,7 @@ module Xerp::CLI::JsonFormatter
         json.field "total_elapsed_ms", stats.total_elapsed_ms
 
         if line_stats = stats.line_stats
-          json.field "cooc.line.v1" do
+          json.field "line" do
             json.object do
               json.field "pairs_stored", line_stats.pairs_stored
               json.field "neighbors_computed", line_stats.neighbors_computed
@@ -116,22 +116,23 @@ module Xerp::CLI::JsonFormatter
           end
         end
 
-        if heir_stats = stats.heir_stats
-          json.field "cooc.heir.v1" do
-            json.object do
-              json.field "pairs_stored", heir_stats.pairs_stored
-              json.field "neighbors_computed", heir_stats.neighbors_computed
-              json.field "elapsed_ms", heir_stats.elapsed_ms
-            end
-          end
-        end
-
         if scope_stats = stats.scope_stats
-          json.field "cooc.scope.v1" do
+          json.field "block" do
             json.object do
               json.field "pairs_stored", scope_stats.pairs_stored
               json.field "neighbors_computed", scope_stats.neighbors_computed
               json.field "elapsed_ms", scope_stats.elapsed_ms
+            end
+          end
+        end
+
+        # heir is deprecated but show if present (old training data)
+        if heir_stats = stats.heir_stats
+          json.field "heir_deprecated" do
+            json.object do
+              json.field "pairs_stored", heir_stats.pairs_stored
+              json.field "neighbors_computed", heir_stats.neighbors_computed
+              json.field "elapsed_ms", heir_stats.elapsed_ms
             end
           end
         end
