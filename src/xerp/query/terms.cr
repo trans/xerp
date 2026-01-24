@@ -85,10 +85,9 @@ module Xerp::Query::Terms
     total_files = Store::Statements.file_count(db).to_f64
     return [] of SalientTerm if total_files == 0
 
-    # Check which models are trained
+    # Only use line model for vector terms (heir model creates spurious associations)
     has_line = Expansion.model_trained?(db, Vectors::Cooccurrence::MODEL_LINE)
-    has_heir = Expansion.model_trained?(db, Vectors::Cooccurrence::MODEL_HEIR)
-    return [] of SalientTerm unless has_line || has_heir
+    return [] of SalientTerm unless has_line
 
     # Build set of query token IDs
     query_token_ids = Set(Int64).new
@@ -109,7 +108,7 @@ module Xerp::Query::Terms
     weights = Expansion::BlendWeights.new
     query_token_ids.each do |token_id|
       neighbors = Expansion.blend_neighbors(db, token_id, opts.top_k_terms, 0.0,
-                                            has_line, has_heir, weights, opts.max_df_percent)
+                                            has_line, false, weights, opts.max_df_percent)
       neighbors.each do |n|
         if existing = score_acc[n[:token_id]]?
           score_acc[n[:token_id]] = {existing[0] + n[:score], existing[1]}
@@ -134,12 +133,17 @@ module Xerp::Query::Terms
     results.first(opts.top_k_terms)
   end
 
-  # Extracts terms from both sources and combines with intersection boost.
+  # Reciprocal Rank Fusion constant (standard value from literature)
+  RRF_K = 60
+
+  # Extracts terms from both sources and combines using Reciprocal Rank Fusion.
+  # RRF score = 1/(k + scope_rank) + 1/(k + vector_rank)
+  # Terms in both sources naturally get higher scores.
   def self.extract_combined(db : DB::Database,
                             query_tokens : Array(String),
                             expanded_tokens : Hash(String, Array(Expansion::ExpandedToken)),
                             opts : TermsOptions) : Array(SalientTerm)
-    # Get terms from both sources
+    # Get terms from both sources (already sorted by salience descending)
     scope_terms = extract_from_scope(db, query_tokens, expanded_tokens, opts)
     vector_terms = extract_from_vectors(db, query_tokens, opts)
 
@@ -147,42 +151,32 @@ module Xerp::Query::Terms
     return scope_terms if vector_terms.empty?
     return vector_terms if scope_terms.empty?
 
-    # Normalize scores to 0-1 range for fair comparison
-    scope_max = scope_terms.map(&.salience).max
-    vector_max = vector_terms.map(&.salience).max
+    # Build rank maps: token_id -> rank (1-indexed)
+    scope_ranks = Hash(Int64, Int32).new
+    scope_terms.each_with_index { |t, i| scope_ranks[t.token_id] = i + 1 }
 
-    # Build combined map: token_id -> {normalized_scope, normalized_vector, term, is_query}
-    combined = Hash(Int64, {Float64, Float64, String, Bool}).new
+    vector_ranks = Hash(Int64, Int32).new
+    vector_terms.each_with_index { |t, i| vector_ranks[t.token_id] = i + 1 }
 
-    scope_terms.each do |t|
-      norm_score = t.salience / scope_max
-      combined[t.token_id] = {norm_score, 0.0, t.term, t.is_query_term}
-    end
+    # Collect all unique tokens with their info
+    all_tokens = Hash(Int64, {String, Bool}).new
+    scope_terms.each { |t| all_tokens[t.token_id] = {t.term, t.is_query_term} }
+    vector_terms.each { |t| all_tokens[t.token_id] ||= {t.term, t.is_query_term} }
 
-    vector_terms.each do |t|
-      norm_score = t.salience / vector_max
-      if existing = combined[t.token_id]?
-        # Term in both - mark for intersection boost
-        combined[t.token_id] = {existing[0], norm_score, existing[2], existing[3]}
-      else
-        combined[t.token_id] = {0.0, norm_score, t.term, t.is_query_term}
-      end
-    end
+    # Compute RRF scores
+    results = all_tokens.map do |token_id, (term, is_query)|
+      scope_rank = scope_ranks[token_id]?
+      vector_rank = vector_ranks[token_id]?
 
-    # Compute final scores with intersection boost
-    results = combined.map do |token_id, (scope_score, vector_score, term, is_query)|
-      # Base: average of normalized scores (treating missing as 0)
-      base_score = (scope_score + vector_score) / 2.0
+      # RRF: sum of reciprocal ranks (missing source contributes 0)
+      rrf_score = 0.0
+      rrf_score += 1.0 / (RRF_K + scope_rank) if scope_rank
+      rrf_score += 1.0 / (RRF_K + vector_rank) if vector_rank
 
-      # Intersection boost if term appears in both
-      if scope_score > 0 && vector_score > 0
-        base_score *= opts.intersection_boost
-      end
+      # Scale up for display (RRF scores are tiny, ~0.01-0.03)
+      display_score = rrf_score * 1000.0
 
-      # Scale back up for display
-      final_score = base_score * Math.max(scope_max, vector_max)
-
-      SalientTerm.new(term, token_id, final_score, is_query, Source::Combined)
+      SalientTerm.new(term, token_id, display_score, is_query, Source::Combined)
     end
 
     results.sort_by! { |t| -t.salience }
