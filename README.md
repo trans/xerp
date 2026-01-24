@@ -12,8 +12,10 @@ Requires [Crystal](https://crystal-lang.org/) 1.9+.
 git clone https://github.com/trans/xerp.git
 cd xerp
 shards install
-crystal build src/xerp.cr -o bin/xerp --release
+crystal build src/xerp.cr -o bin/xerp -Dpreview_mt --release
 ```
+
+The `-Dpreview_mt` flag enables multi-threaded training (2-3x faster).
 
 Optional: install man page
 ```sh
