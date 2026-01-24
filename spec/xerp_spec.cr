@@ -98,7 +98,7 @@ describe Xerp::Store::Database do
     begin
       database = Xerp::Store::Database.new(db_path)
       database.migrate!
-      database.schema_version.should eq(5)
+      database.schema_version.should eq(6)
 
       # Verify tables exist
       database.with_connection do |db|

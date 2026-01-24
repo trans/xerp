@@ -141,7 +141,8 @@ module Xerp::Query::Expansion
 
   # Checks if a specific model has been trained.
   def self.model_trained?(db : DB::Database, model : String) : Bool
-    count = db.scalar("SELECT COUNT(*) FROM token_neighbors WHERE model = ?", model).as(Int64)
+    mid = Vectors::Cooccurrence.model_id(model)
+    count = db.scalar("SELECT COUNT(*) FROM token_neighbors WHERE model_id = ?", mid).as(Int64)
     count > 0
   end
 
@@ -225,12 +226,13 @@ module Xerp::Query::Expansion
   private def self.get_neighbors_for_model(db : DB::Database, token_id : Int64, model : String,
                                            limit : Int32, min_similarity : Float64) : Array(NamedTuple(token: String, token_id: Int64, similarity: Float64, kind: Tokenize::TokenKind, df: Int32))
     neighbors = [] of NamedTuple(token: String, token_id: Int64, similarity: Float64, kind: Tokenize::TokenKind, df: Int32)
+    mid = Vectors::Cooccurrence.model_id(model)
 
-    db.query(<<-SQL, model, token_id, min_similarity, limit) do |rs|
+    db.query(<<-SQL, mid, token_id, min_similarity, limit) do |rs|
       SELECT t.token, t.token_id, t.kind, t.df, n.similarity
       FROM token_neighbors n
       JOIN tokens t ON t.token_id = n.neighbor_id
-      WHERE n.model = ?
+      WHERE n.model_id = ?
         AND n.token_id = ?
         AND n.similarity >= ?
         AND t.kind IN ('ident', 'word', 'compound')

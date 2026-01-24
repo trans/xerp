@@ -13,11 +13,23 @@ module Xerp::Vectors
   # LINE is traditional word2vec-style co-occurrence (whole document, one pass).
   # HEIR captures header↔child relationships explicitly.
   module Cooccurrence
-    # Model identifiers
+    # Model identifiers (name -> id mapping)
     MODEL_LINE  = "cooc.line.v1"
     MODEL_HEIR  = "cooc.heir.v1"
     MODEL_SCOPE = "cooc.scope.v1"
     VALID_MODELS = [MODEL_LINE, MODEL_HEIR, MODEL_SCOPE]
+
+    # Model name to ID mapping (matches models table)
+    MODEL_IDS = {
+      MODEL_LINE  => 1,
+      MODEL_HEIR  => 2,
+      MODEL_SCOPE => 3,
+    }
+
+    # Gets model_id for a model name
+    def self.model_id(model : String) : Int32
+      MODEL_IDS[model]? || raise ArgumentError.new("Invalid model: #{model}")
+    end
 
     # Default training parameters
     DEFAULT_WINDOW_SIZE  =  5  # ±N tokens
@@ -50,7 +62,7 @@ module Xerp::Vectors
       pairs_stored = 0_i64
 
       # Clear existing co-occurrence data for this model only
-      db.exec("DELETE FROM token_cooccurrence WHERE model = ?", model)
+      db.exec("DELETE FROM token_cooccurrence WHERE model_id = ?", model_id(model))
 
       # Build counts from each file
       files = Store::Statements.all_files(db)
@@ -414,10 +426,10 @@ module Xerp::Vectors
     # Upserts a co-occurrence count.
     private def self.upsert_cooccurrence(db : DB::Database, model : String,
                                          token_id : Int64, context_id : Int64, count : Int32) : Nil
-      db.exec(<<-SQL, model, token_id, context_id, count, count)
-        INSERT INTO token_cooccurrence (model, token_id, context_id, count)
+      db.exec(<<-SQL, model_id(model), token_id, context_id, count, count)
+        INSERT INTO token_cooccurrence (model_id, token_id, context_id, count)
         VALUES (?, ?, ?, ?)
-        ON CONFLICT (model, token_id, context_id)
+        ON CONFLICT (model_id, token_id, context_id)
         DO UPDATE SET count = count + ?
       SQL
     end
@@ -431,8 +443,8 @@ module Xerp::Vectors
       raise ArgumentError.new("Invalid model: #{model}") unless VALID_MODELS.includes?(model)
 
       # Clear existing neighbors for this model only
-      db.exec("DELETE FROM token_neighbors WHERE model = ?", model)
-      db.exec("DELETE FROM token_vector_norms WHERE model = ?", model)
+      db.exec("DELETE FROM token_neighbors WHERE model_id = ?", model_id(model))
+      db.exec("DELETE FROM token_vector_norms WHERE model_id = ?", model_id(model))
 
       # Load all co-occurrence data into memory (single query)
       vectors, inverted_index, token_counts = load_cooccurrence_data(db, model)
@@ -455,7 +467,7 @@ module Xerp::Vectors
       neighbors_computed = store_all_neighbors(db, model, all_neighbors)
 
       # Clean up intermediate cache (norms are recomputed from cooccurrence anyway)
-      db.exec("DELETE FROM token_vector_norms WHERE model = ?", model)
+      db.exec("DELETE FROM token_vector_norms WHERE model_id = ?", model_id(model))
 
       neighbors_computed
     end
@@ -472,7 +484,7 @@ module Xerp::Vectors
       # token_counts[token_id] = total count (for min_count filtering)
       token_counts = Hash(Int64, Int64).new(0_i64)
 
-      db.query("SELECT token_id, context_id, count FROM token_cooccurrence WHERE model = ?", model) do |rs|
+      db.query("SELECT token_id, context_id, count FROM token_cooccurrence WHERE model_id = ?", model_id(model)) do |rs|
         rs.each do
           token_id = rs.read(Int64)
           context_id = rs.read(Int64)
@@ -537,11 +549,12 @@ module Xerp::Vectors
 
     # Batch cache norms to database using a transaction for speed.
     private def self.cache_norms(db : DB::Database, model : String, norms : Hash(Int64, Float64)) : Nil
+      mid = model_id(model)
       db.exec("BEGIN TRANSACTION")
       begin
         norms.each do |token_id, norm|
-          db.exec("INSERT OR REPLACE INTO token_vector_norms (model, token_id, norm) VALUES (?, ?, ?)",
-                  model, token_id, norm)
+          db.exec("INSERT OR REPLACE INTO token_vector_norms (model_id, token_id, norm) VALUES (?, ?, ?)",
+                  mid, token_id, norm)
         end
         db.exec("COMMIT")
       rescue ex
@@ -604,13 +617,14 @@ module Xerp::Vectors
     private def self.store_all_neighbors(db : DB::Database, model : String,
                                          all_neighbors : Hash(Int64, Array({Int64, Float64}))) : Int64
       count = 0_i64
+      mid = model_id(model)
 
       db.exec("BEGIN TRANSACTION")
       begin
         all_neighbors.each do |token_id, neighbors|
           neighbors.each do |(neighbor_id, similarity)|
-            db.exec("INSERT INTO token_neighbors (model, token_id, neighbor_id, similarity) VALUES (?, ?, ?, ?)",
-                    model, token_id, neighbor_id, similarity)
+            db.exec("INSERT INTO token_neighbors (model_id, token_id, neighbor_id, similarity) VALUES (?, ?, ?, ?)",
+                    mid, token_id, neighbor_id, similarity)
             count += 1
           end
         end
@@ -626,9 +640,10 @@ module Xerp::Vectors
     # Stores neighbors in the database for a specific model.
     private def self.store_neighbors(db : DB::Database, model : String,
                                      token_id : Int64, neighbors : Array({Int64, Float64})) : Nil
+      mid = model_id(model)
       neighbors.each do |(neighbor_id, similarity)|
-        db.exec(<<-SQL, model, token_id, neighbor_id, similarity)
-          INSERT INTO token_neighbors (model, token_id, neighbor_id, similarity)
+        db.exec(<<-SQL, mid, token_id, neighbor_id, similarity)
+          INSERT INTO token_neighbors (model_id, token_id, neighbor_id, similarity)
           VALUES (?, ?, ?, ?)
         SQL
       end

@@ -2,7 +2,7 @@ require "sqlite3"
 
 module Xerp::Store
   module Migrations
-    CURRENT_VERSION = 5
+    CURRENT_VERSION = 6
 
     # Runs all pending migrations on the database.
     def self.migrate!(db : DB::Database) : Nil
@@ -34,6 +34,7 @@ module Xerp::Store
       when 3 then migrate_v3(db)
       when 4 then migrate_v4(db)
       when 5 then migrate_v5(db)
+      when 6 then migrate_v6(db)
       else        raise "Unknown migration version: #{version}"
       end
     end
@@ -289,6 +290,89 @@ module Xerp::Store
         INSERT INTO token_vector_norms_new (model, token_id, norm)
         SELECT 'cooc.line.v1', token_id, norm
         FROM token_vector_norms
+      SQL
+
+      db.exec "DROP TABLE token_vector_norms"
+      db.exec "ALTER TABLE token_vector_norms_new RENAME TO token_vector_norms"
+    end
+
+    # Migration v6: Normalize model strings to model_id for space savings
+    private def self.migrate_v6(db : DB::Database) : Nil
+      # Create models lookup table
+      db.exec <<-SQL
+        CREATE TABLE IF NOT EXISTS models (
+          model_id INTEGER PRIMARY KEY,
+          name     TEXT NOT NULL UNIQUE
+        )
+      SQL
+
+      # Insert known models
+      db.exec "INSERT OR IGNORE INTO models (model_id, name) VALUES (1, 'cooc.line.v1')"
+      db.exec "INSERT OR IGNORE INTO models (model_id, name) VALUES (2, 'cooc.heir.v1')"
+      db.exec "INSERT OR IGNORE INTO models (model_id, name) VALUES (3, 'cooc.scope.v1')"
+
+      # Recreate token_cooccurrence with model_id
+      db.exec <<-SQL
+        CREATE TABLE token_cooccurrence_new (
+          model_id    INTEGER NOT NULL REFERENCES models(model_id),
+          token_id    INTEGER NOT NULL REFERENCES tokens(token_id) ON DELETE CASCADE,
+          context_id  INTEGER NOT NULL REFERENCES tokens(token_id) ON DELETE CASCADE,
+          count       INTEGER NOT NULL,
+          PRIMARY KEY (model_id, token_id, context_id)
+        )
+      SQL
+
+      db.exec <<-SQL
+        INSERT INTO token_cooccurrence_new (model_id, token_id, context_id, count)
+        SELECT m.model_id, c.token_id, c.context_id, c.count
+        FROM token_cooccurrence c
+        JOIN models m ON m.name = c.model
+      SQL
+
+      db.exec "DROP TABLE token_cooccurrence"
+      db.exec "ALTER TABLE token_cooccurrence_new RENAME TO token_cooccurrence"
+      db.exec "CREATE INDEX idx_cooccurrence_token ON token_cooccurrence(token_id)"
+
+      # Recreate token_neighbors with model_id
+      db.exec <<-SQL
+        CREATE TABLE token_neighbors_new (
+          model_id     INTEGER NOT NULL REFERENCES models(model_id),
+          token_id     INTEGER NOT NULL REFERENCES tokens(token_id) ON DELETE CASCADE,
+          neighbor_id  INTEGER NOT NULL REFERENCES tokens(token_id) ON DELETE CASCADE,
+          similarity   REAL NOT NULL,
+          PRIMARY KEY (model_id, token_id, neighbor_id)
+        )
+      SQL
+
+      db.exec <<-SQL
+        INSERT INTO token_neighbors_new (model_id, token_id, neighbor_id, similarity)
+        SELECT m.model_id, n.token_id, n.neighbor_id, n.similarity
+        FROM token_neighbors n
+        JOIN models m ON m.name = n.model
+      SQL
+
+      db.exec "DROP TABLE token_neighbors"
+      db.exec "ALTER TABLE token_neighbors_new RENAME TO token_neighbors"
+      db.exec <<-SQL
+        CREATE INDEX idx_token_neighbors_model_similarity
+        ON token_neighbors(model_id, token_id, similarity DESC)
+      SQL
+
+      # Recreate token_vector_norms with model_id
+      db.exec <<-SQL
+        CREATE TABLE token_vector_norms_new (
+          model_id INTEGER NOT NULL REFERENCES models(model_id),
+          token_id INTEGER NOT NULL REFERENCES tokens(token_id) ON DELETE CASCADE,
+          norm     REAL NOT NULL,
+          PRIMARY KEY (model_id, token_id)
+        )
+      SQL
+
+      db.exec <<-SQL
+        INSERT INTO token_vector_norms_new (model_id, token_id, norm)
+        SELECT m.model_id, v.token_id, v.norm
+        FROM token_vector_norms v
+        JOIN models m ON m.name = v.model
       SQL
 
       db.exec "DROP TABLE token_vector_norms"
