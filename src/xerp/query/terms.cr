@@ -91,7 +91,7 @@ module Xerp::Query::Terms
     total_files = Store::Statements.file_count(db).to_f64
     return [] of SalientTerm if total_files == 0
 
-    # Use line or scope model (heir model creates spurious associations)
+    # Use line or scope model
     has_line = Expansion.model_trained?(db, Vectors::Cooccurrence::MODEL_LINE)
     has_scope = Expansion.model_trained?(db, Vectors::Cooccurrence::MODEL_SCOPE)
     return [] of SalientTerm unless has_line || has_scope

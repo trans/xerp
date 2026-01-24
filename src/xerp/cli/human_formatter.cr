@@ -203,20 +203,6 @@ module Xerp::CLI::HumanFormatter
       result << "ms\n\n"
     end
 
-    # heir is deprecated but show if present (old training data)
-    if heir_stats = stats.heir_stats
-      result << "heir (deprecated):\n"
-      result << "  co-occurrence pairs: "
-      result << heir_stats.pairs_stored
-      result << "\n"
-      result << "  neighbors computed:  "
-      result << heir_stats.neighbors_computed
-      result << "\n"
-      result << "  time:                "
-      result << heir_stats.elapsed_ms
-      result << "ms\n\n"
-    end
-
     result << "Total time: "
     result << stats.total_elapsed_ms
     result << "ms\n"

@@ -6,23 +6,19 @@ module Xerp::Vectors
   #
   # Models:
   #   MODEL_LINE:  Traditional linear - sliding window over whole file in text order
-  #   MODEL_HEIR:  Hierarchical - virtual sequences [reversed_ancestor_headers..., line_tokens]
-  #   MODEL_SCOPE: Scope-aware - shallow outline (header + direct children + footer per block)
+  #   MODEL_SCOPE: Scope-aware - level-based isolation (leaves swept alone, siblings co-occur)
   #
   # SCOPE is recommended for code - respects logical structure without crossing scope boundaries.
   # LINE is traditional word2vec-style co-occurrence (whole document, one pass).
-  # HEIR captures header↔child relationships explicitly.
   module Cooccurrence
     # Model identifiers (name -> id mapping)
     MODEL_LINE  = "cooc.line.v1"
-    MODEL_HEIR  = "cooc.heir.v1"
     MODEL_SCOPE = "cooc.scope.v1"
-    VALID_MODELS = [MODEL_LINE, MODEL_HEIR, MODEL_SCOPE]
+    VALID_MODELS = [MODEL_LINE, MODEL_SCOPE]
 
     # Model name to ID mapping (matches models table)
     MODEL_IDS = {
       MODEL_LINE  => 1,
-      MODEL_HEIR  => 2,
       MODEL_SCOPE => 3,
     }
 
@@ -49,10 +45,6 @@ module Xerp::Vectors
     DEFAULT_MIN_COUNT    =  3  # Minimum total occurrences to include
     DEFAULT_TOP_NEIGHBORS = 32 # Max neighbors to store per token
 
-    # Hierarchical context parameters
-    DEFAULT_MAX_ANCESTOR_DEPTH = 2  # How far up the block tree to look (parent + grandparent)
-    ANCESTOR_DECAY = [1.0, 0.7, 0.5]  # Weight decay by depth (0=parent, 1=grandparent, 2=great-grandparent)
-
     # Result of co-occurrence training
     struct TrainResult
       getter tokens_processed : Int64
@@ -65,8 +57,8 @@ module Xerp::Vectors
     end
 
     # Builds co-occurrence counts from all indexed files for a specific model.
-    # MODEL_LINE: sliding window co-occurrence within blocks (sibling relationships)
-    # MODEL_HEIR: virtual sequences with ancestor headers (parent/child relationships)
+    # MODEL_LINE: sliding window co-occurrence (textual proximity)
+    # MODEL_SCOPE: level-based isolation (structural siblings)
     def self.build_counts(db : DB::Database,
                           model : String,
                           window_size : Int32 = DEFAULT_WINDOW_SIZE) : Int64
@@ -100,11 +92,8 @@ module Xerp::Vectors
       if model == MODEL_LINE
         # Linear model: traditional whole-document sliding window
         pairs_count += count_linear_pairs(db, model, postings, window_size)
-      elsif model == MODEL_HEIR
-        # Hierarchical model: virtual sequences with ancestor headers
-        pairs_count += count_hierarchical_pairs_new(db, model, file_id, blocks, postings, window_size)
       elsif model == MODEL_SCOPE
-        # Scope model: header + direct children + footer (shallow outline)
+        # Scope model: level-based isolation (leaves swept alone, siblings co-occur)
         pairs_count += count_scope_pairs(db, model, file_id, blocks, postings, window_size)
       end
 
@@ -132,64 +121,6 @@ module Xerp::Vectors
       # Run sliding window once over the whole file
       counts = Hash({Int64, Int64}, Float64).new(0.0)
       count_window_pairs_weighted(all_tokens, window_size, 1.0, counts)
-
-      # Upsert all counts to database
-      pairs = 0_i64
-      counts.each do |(token_id, context_id), weight|
-        count = Math.max(1, weight.round.to_i32)
-        upsert_cooccurrence(db, model, token_id, context_id, count)
-        upsert_cooccurrence(db, model, context_id, token_id, count)
-        pairs += 1
-      end
-
-      pairs
-    end
-
-    # Counts hierarchical co-occurrences using virtual sequences.
-    # For each line, creates separate virtual sequences for each ancestor level:
-    #   [reversed_header_tokens..., line_tokens...]
-    # Then runs windowed co-occurrence with depth-based weight multiplier.
-    private def self.count_hierarchical_pairs_new(db : DB::Database,
-                                                  model : String,
-                                                  file_id : Int64,
-                                                  blocks : Array(FileBlockWithParent),
-                                                  postings : Array(FilePosting),
-                                                  window_size : Int32) : Int64
-      return 0_i64 if blocks.empty?
-
-      # Get header tokens for each block (first line tokens)
-      block_headers = get_block_header_tokens(db, file_id, blocks)
-
-      # Group postings by line number
-      postings_by_line = group_postings_by_line(postings)
-
-      # Build block lookup and determine line ranges
-      block_by_id = blocks.map { |b| {b.block_id, b} }.to_h
-
-      # Accumulate all counts in memory first
-      counts = Hash({Int64, Int64}, Float64).new(0.0)
-
-      postings_by_line.each do |line_num, line_token_ids|
-        next if line_token_ids.empty?
-
-        # Get ancestor chain for this line (innermost first)
-        ancestors = get_ancestor_chain(line_num, blocks, block_by_id)
-
-        ancestors.each_with_index do |block, depth|
-          next if depth > DEFAULT_MAX_ANCESTOR_DEPTH
-          depth_weight = ANCESTOR_DECAY[Math.min(depth, ANCESTOR_DECAY.size - 1)]
-
-          # Get header tokens for this ancestor (reversed so start is closest to line)
-          header_tokens = block_headers[block.block_id]? || [] of Int64
-          reversed_header = header_tokens.reverse
-
-          # Build virtual sequence: reversed header + line tokens
-          virtual_seq = reversed_header + line_token_ids
-
-          # Run windowed co-occurrence with depth weight multiplier
-          count_window_pairs_weighted(virtual_seq, window_size, depth_weight, counts)
-        end
-      end
 
       # Upsert all counts to database
       pairs = 0_i64
@@ -279,70 +210,6 @@ module Xerp::Vectors
       pairs
     end
 
-    # Gets indent level for each line in a file.
-    private def self.get_line_levels(db : DB::Database, file_id : Int64) : Hash(Int32, Int32)
-      levels = Hash(Int32, Int32).new
-
-      # For each line, find the innermost block containing it and use that block's level
-      # A line's level is the level of the smallest block it belongs to
-      db.query(<<-SQL, file_id) do |rs|
-        SELECT start_line, end_line, level
-        FROM blocks
-        WHERE file_id = ?
-        ORDER BY (end_line - start_line) ASC  -- Smallest blocks first
-      SQL
-        rs.each do
-          start_line = rs.read(Int32)
-          end_line = rs.read(Int32)
-          level = rs.read(Int32)
-
-          # Assign level to all lines in this block (smaller blocks override)
-          (start_line..end_line).each do |line|
-            levels[line] = level
-          end
-        end
-      end
-
-      levels
-    end
-
-    # Gets header tokens (first line tokens) for each block.
-    private def self.get_block_header_tokens(db : DB::Database,
-                                             file_id : Int64,
-                                             blocks : Array(FileBlockWithParent)) : Hash(Int64, Array(Int64))
-      headers = Hash(Int64, Array(Int64)).new
-
-      # Get all start lines we need
-      start_lines = blocks.map(&.start_line).to_set
-
-      # Query postings for this file and filter to start lines
-      db.query(<<-SQL, file_id) do |rs|
-        SELECT p.token_id, p.lines_blob
-        FROM postings p
-        WHERE p.file_id = ?
-      SQL
-        rs.each do
-          token_id = rs.read(Int64)
-          lines_blob = rs.read(Bytes)
-          lines = Xerp::Index::PostingsBuilder.decode_lines(lines_blob)
-
-          lines.each do |line|
-            if start_lines.includes?(line)
-              # Find which block(s) start on this line
-              blocks.each do |block|
-                if block.start_line == line
-                  headers[block.block_id] ||= [] of Int64
-                  headers[block.block_id] << token_id
-                end
-              end
-            end
-          end
-        end
-      end
-
-      headers
-    end
-
     # Groups postings by line number.
     private def self.group_postings_by_line(postings : Array(FilePosting)) : Hash(Int32, Array(Int64))
       by_line = Hash(Int32, Array(Int64)).new
@@ -355,34 +222,6 @@ module Xerp::Vectors
       end
 
       by_line
-    end
-
-    # Gets the ancestor chain for a line (innermost/containing block first).
-    private def self.get_ancestor_chain(line_num : Int32,
-                                        blocks : Array(FileBlockWithParent),
-                                        block_by_id : Hash(Int64, FileBlockWithParent)) : Array(FileBlockWithParent)
-      ancestors = [] of FileBlockWithParent
-
-      # Find the innermost block containing this line
-      containing_block = blocks.find do |block|
-        line_num >= block.start_line && line_num <= block.end_line
-      end
-
-      return ancestors unless containing_block
-
-      # Walk up the ancestor chain
-      current = containing_block
-      while current
-        ancestors << current
-
-        if parent_id = current.parent_block_id
-          current = block_by_id[parent_id]?
-        else
-          break
-        end
-      end
-
-      ancestors
     end
 
     # Counts windowed co-occurrences with a weight multiplier, accumulating into counts hash.

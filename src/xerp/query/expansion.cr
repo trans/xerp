@@ -10,21 +10,18 @@ module Xerp::Query::Expansion
   DEFAULT_MAX_DF_PERCENT  = 22.0 # Filter terms in >22% of files
   KIND_ALLOWLIST          = Set{Tokenize::TokenKind::Ident, Tokenize::TokenKind::Word, Tokenize::TokenKind::Compound}
 
-  # Default blend weights for union+rerank
-  DEFAULT_W_LINE     = 0.6  # Weight for linear model similarity
-  DEFAULT_W_HEIR     = 0.4  # Weight for hierarchical model similarity
+  # Default blend weights for scoring
+  DEFAULT_W_LINE     = 1.0  # Weight for linear model similarity
   DEFAULT_W_IDF      = 0.1  # Weight for IDF boost
   DEFAULT_W_FEEDBACK = 0.2  # Weight for feedback boost
 
   # Blend weights configuration
   struct BlendWeights
     getter w_line : Float64
-    getter w_heir : Float64
     getter w_idf : Float64
     getter w_feedback : Float64
 
     def initialize(@w_line = DEFAULT_W_LINE,
-                   @w_heir = DEFAULT_W_HEIR,
                    @w_idf = DEFAULT_W_IDF,
                    @w_feedback = DEFAULT_W_FEEDBACK)
     end
@@ -52,9 +49,8 @@ module Xerp::Query::Expansion
                   max_df_percent : Float64 = DEFAULT_MAX_DF_PERCENT) : Hash(String, Array(ExpandedToken))
     result = Hash(String, Array(ExpandedToken)).new
 
-    # Check which models have been trained
+    # Check if line model has been trained
     has_line = model_trained?(db, Vectors::Cooccurrence::MODEL_LINE)
-    has_heir = model_trained?(db, Vectors::Cooccurrence::MODEL_HEIR)
 
     query_tokens.each do |token|
       expansions = [] of ExpandedToken
@@ -73,10 +69,10 @@ module Xerp::Query::Expansion
           kind: kind
         )
 
-        # Add semantic neighbors if any model is available
-        if has_line || has_heir
-          neighbors = blend_neighbors(db, token_row.id, top_k, min_similarity,
-                                      has_line, has_heir, weights, max_df_percent)
+        # Add semantic neighbors if line model is available
+        if has_line
+          neighbors = get_neighbors(db, token_row.id, top_k, min_similarity,
+                                    weights, max_df_percent)
           neighbors.each do |neighbor|
             expansions << ExpandedToken.new(
               original: token,
@@ -103,9 +99,9 @@ module Xerp::Query::Expansion
             )
 
             # Add semantic neighbors for lowercase match
-            if has_line || has_heir
-              neighbors = blend_neighbors(db, lower_row.id, top_k, min_similarity,
-                                          has_line, has_heir, weights, max_df_percent)
+            if has_line
+              neighbors = get_neighbors(db, lower_row.id, top_k, min_similarity,
+                                        weights, max_df_percent)
               neighbors.each do |neighbor|
                 # Adjust score to account for case mismatch penalty
                 expansions << ExpandedToken.new(
@@ -146,74 +142,48 @@ module Xerp::Query::Expansion
     count > 0
   end
 
-  # Blends neighbors from both models using union+rerank strategy.
-  # 1. Get top-K from each available model
-  # 2. Union candidates (dedupe by token_id)
-  # 3. Rerank with: score = w1*s_lin + w2*s_heir + w3*idf + w4*feedback_boost
-  # 4. Return top-K by score
-  def self.blend_neighbors(db : DB::Database, token_id : Int64,
-                           top_k : Int32, min_similarity : Float64,
-                           has_line : Bool, has_heir : Bool,
-                           weights : BlendWeights,
-                           max_df_percent : Float64 = DEFAULT_MAX_DF_PERCENT) : Array(NamedTuple(token: String, token_id: Int64, score: Float64, kind: Tokenize::TokenKind))
-    # Collect candidates from both models
-    # token_id => {s_line, s_heir, token, kind, df}
-    candidates = Hash(Int64, {Float64, Float64, String, Tokenize::TokenKind, Int32}).new
-
+  # Gets neighbors from the line model with scoring.
+  # Reranks with: score = w1*similarity + w2*idf + w3*feedback_boost
+  def self.get_neighbors(db : DB::Database, token_id : Int64,
+                         top_k : Int32, min_similarity : Float64,
+                         weights : BlendWeights,
+                         max_df_percent : Float64 = DEFAULT_MAX_DF_PERCENT) : Array(NamedTuple(token: String, token_id: Int64, score: Float64, kind: Tokenize::TokenKind))
     # Fetch more candidates than we need for better reranking
     fetch_limit = top_k * 2
 
-    # Get linear model neighbors
-    if has_line
-      get_neighbors_for_model(db, token_id, Vectors::Cooccurrence::MODEL_LINE,
-                              fetch_limit, min_similarity).each do |n|
-        candidates[n[:token_id]] = {n[:similarity], 0.0, n[:token], n[:kind], n[:df]}
-      end
-    end
-
-    # Get hierarchical model neighbors
-    if has_heir
-      get_neighbors_for_model(db, token_id, Vectors::Cooccurrence::MODEL_HEIR,
-                              fetch_limit, min_similarity).each do |n|
-        if existing = candidates[n[:token_id]]?
-          # Update with heir similarity, keep other fields
-          candidates[n[:token_id]] = {existing[0], n[:similarity], existing[2], existing[3], existing[4]}
-        else
-          candidates[n[:token_id]] = {0.0, n[:similarity], n[:token], n[:kind], n[:df]}
-        end
-      end
-    end
+    # Get line model neighbors
+    candidates = get_neighbors_for_model(db, token_id, Vectors::Cooccurrence::MODEL_LINE,
+                                         fetch_limit, min_similarity)
 
     return [] of NamedTuple(token: String, token_id: Int64, score: Float64, kind: Tokenize::TokenKind) if candidates.empty?
 
     # Get feedback stats for candidates
-    feedback_boosts = get_feedback_boosts(db, candidates.keys)
+    feedback_boosts = get_feedback_boosts(db, candidates.map { |n| n[:token_id] })
 
     # Compute total file count for IDF normalization
     total_files = Math.max(Store::Statements.file_count(db).to_f64, 1.0)
 
     # Rerank candidates
-    scored = candidates.compact_map do |tid, (s_line, s_heir, token, kind, df)|
-      # Filter by max_df_percent (e.g., 40 = filter terms in >40% of files)
-      df_percent = (df.to_f64 / total_files) * 100.0
+    scored = candidates.compact_map do |n|
+      # Filter by max_df_percent (e.g., 22 = filter terms in >22% of files)
+      df_percent = (n[:df].to_f64 / total_files) * 100.0
       next nil if df_percent > max_df_percent
 
       # Compute IDF: ln((N+1)/(df+1)) + 1 (matches DESIGN02-00 formula)
-      idf = Math.log((total_files + 1.0) / (df.to_f64 + 1.0)) + 1.0
+      idf = Math.log((total_files + 1.0) / (n[:df].to_f64 + 1.0)) + 1.0
 
       # Normalize IDF to 0-1 range (assuming max IDF around 10)
       idf_normalized = Math.min(1.0, idf / 10.0)
 
       # Get feedback boost (0.0 if no feedback)
-      feedback_boost = feedback_boosts[tid]? || 0.0
+      feedback_boost = feedback_boosts[n[:token_id]]? || 0.0
 
-      # Compute blended score
-      score = weights.w_line * s_line +
-              weights.w_heir * s_heir +
+      # Compute score
+      score = weights.w_line * n[:similarity] +
               weights.w_idf * idf_normalized +
               weights.w_feedback * feedback_boost
 
-      {token: token, token_id: tid, score: score, kind: kind}
+      {token: n[:token], token_id: n[:token_id], score: score, kind: n[:kind]}
     end
 
     # Filter by minimum similarity and sort by score descending

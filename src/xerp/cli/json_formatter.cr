@@ -126,16 +126,6 @@ module Xerp::CLI::JsonFormatter
           end
         end
 
-        # heir is deprecated but show if present (old training data)
-        if heir_stats = stats.heir_stats
-          json.field "heir_deprecated" do
-            json.object do
-              json.field "pairs_stored", heir_stats.pairs_stored
-              json.field "neighbors_computed", heir_stats.neighbors_computed
-              json.field "elapsed_ms", heir_stats.elapsed_ms
-            end
-          end
-        end
       end
     end
   end
