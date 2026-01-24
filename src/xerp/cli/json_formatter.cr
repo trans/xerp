@@ -182,7 +182,7 @@ module Xerp::CLI::JsonFormatter
   end
 
   # Formats headers listing as JSON (pretty-printed).
-  def self.format_headers(result : HeadersCommand::HeadersResult) : String
+  def self.format_outline(result : OutlineCommand::OutlineResult) : String
     JSON.build(indent: "  ") do |json|
       json.object do
         json.field "block_count", result.block_count

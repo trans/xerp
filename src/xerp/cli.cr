@@ -7,7 +7,7 @@ require "./cli/query_command"
 require "./cli/mark_command"
 require "./cli/train_command"
 require "./cli/terms_command"
-require "./cli/headers_command"
+require "./cli/outline_command"
 
 module Xerp::CLI
   VERSION = Xerp::VERSION
@@ -215,9 +215,9 @@ module Xerp::CLI
     "required": ["query"]
   })
 
-  HEADERS_SCHEMA = %({
+  OUTLINE_SCHEMA = %({
     "type": "object",
-    "description": "List block headers from indexed files",
+    "description": "Show structural outline of indexed files",
     "properties": {
       "root": {
         "type": "string",
@@ -258,7 +258,7 @@ module Xerp::CLI
     cli.subcommand("mark", MARK_SCHEMA)
     cli.subcommand("train", TRAIN_SCHEMA)
     cli.subcommand("terms", TERMS_SCHEMA)
-    cli.subcommand("headers", HEADERS_SCHEMA)
+    cli.subcommand("outline", OUTLINE_SCHEMA)
     cli.default_subcommand("query")
 
     result = cli.parse(args)
@@ -279,8 +279,8 @@ module Xerp::CLI
       TrainCommand.run(result)
     when "terms"
       TermsCommand.run(result)
-    when "headers"
-      HeadersCommand.run(result)
+    when "outline"
+      OutlineCommand.run(result)
     else
       print_usage
       0
@@ -296,7 +296,7 @@ module Xerp::CLI
     puts "  index    Index workspace files"
     puts "  query    Search indexed content (alias: q)"
     puts "  terms    Find related terms (scope, vector, or combined)"
-    puts "  headers  List block headers from indexed files"
+    puts "  outline  Show structural outline of indexed files"
     puts "  mark     Record feedback on results"
     puts "  train    Train semantic token vectors"
     puts "  version  Show version"
@@ -311,8 +311,8 @@ module Xerp::CLI
     puts "  xerp terms retry --source line    # Line vector model"
     puts "  xerp terms retry --source block   # Block vector model"
     puts "  xerp terms retry --source vector  # Both line+block models"
-    puts "  xerp headers                      # List all block headers"
-    puts "  xerp headers --file 'src/*.cr'    # Filter by file pattern"
+    puts "  xerp outline                      # Show code structure"
+    puts "  xerp outline --file 'src/*.cr'    # Filter by file pattern"
     puts "  xerp mark abc123 --useful         # Mark result as useful"
   end
 end

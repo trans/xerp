@@ -137,6 +137,26 @@ xerp mark RESULT_ID --not-useful
 xerp mark RESULT_ID --promising --note "good lead"
 ```
 
+### Code outline
+
+Show the structural outline of indexed files:
+
+```sh
+xerp outline                      # all files
+xerp outline --file 'src/*.cr'    # filter by pattern
+xerp outline --level 3            # show deeper nesting
+```
+
+Output:
+```
+xerp outline: 42 blocks in 5 files (3ms)
+src/http/client.cr
+  11| module Http
+  12|   class Client
+  45|     def retry_request(url, max_attempts = 3)
+  89|     def fetch(url)
+```
+
 ## How it works
 
 1. **Indexing** - Files are parsed into hierarchical blocks based on indentation (code) or headings (markdown). Tokens are extracted and stored with their locations.

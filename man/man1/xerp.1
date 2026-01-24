@@ -1,4 +1,4 @@
-.TH XERP 1 "January 2026" "xerp 0.2.0" "User Commands"
+.TH XERP 1 "January 2026" "xerp 0.2.1" "User Commands"
 .SH NAME
 xerp \- intent-first search for code and text
 .SH SYNOPSIS
@@ -31,9 +31,9 @@ query expansion and term discovery.
 Record feedback on search results. Helps improve future searches by
 learning which results are useful.
 .TP
-.B headers
-List block headers from indexed files. Shows the structural outline
-of code (modules, classes, functions) with line numbers.
+.B outline
+Show structural outline of indexed files. Displays the code structure
+(modules, classes, functions) with line numbers preserving indentation.
 .TP
 .B version
 Show version information.
@@ -157,7 +157,7 @@ Mark result as not useful.
 .TP
 .B \-\-note \fItext\fR
 Add a note to the feedback.
-.SH HEADERS OPTIONS
+.SH OUTLINE OPTIONS
 .TP
 .B \-\-file \fIglob\fR
 Filter by file path glob pattern (e.g., "src/**/*.cr").
@@ -217,13 +217,13 @@ xerp mark abc123 --useful
 .fi
 .RE
 .PP
-List code structure outline:
+Show code structure outline:
 .PP
 .RS
 .nf
-xerp headers
-xerp headers --file 'src/**/*.cr'
-xerp headers --level 3
+xerp outline
+xerp outline --file 'src/**/*.cr'
+xerp outline --level 3
 .fi
 .RE
 .SH FILES

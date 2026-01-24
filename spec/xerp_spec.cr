@@ -2,7 +2,7 @@ require "./spec_helper"
 
 describe Xerp do
   it "has a version" do
-    Xerp::VERSION.should eq("0.2.0")
+    Xerp::VERSION.should eq("0.2.1")
   end
 end
 

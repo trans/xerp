@@ -3,7 +3,7 @@ require "../store/db"
 require "../store/statements"
 
 module Xerp::CLI
-  module HeadersCommand
+  module OutlineCommand
     struct HeaderEntry
       getter file_path : String
       getter line_num : Int32
@@ -14,7 +14,7 @@ module Xerp::CLI
       end
     end
 
-    struct HeadersResult
+    struct OutlineResult
       getter entries : Array(HeaderEntry)
       getter file_count : Int32
       getter block_count : Int32
@@ -40,14 +40,14 @@ module Xerp::CLI
       end
 
       database = Store::Database.new(config.db_path)
-      headers_result : HeadersResult? = nil
+      headers_result : OutlineResult? = nil
       database.with_connection do |db|
         headers_result = fetch_headers(db, file_pattern, max_level)
       end
 
       result = headers_result.not_nil!
       elapsed = (Time.monotonic - start_time).total_milliseconds.to_i64
-      result_with_timing = HeadersResult.new(
+      result_with_timing = OutlineResult.new(
         result.entries,
         result.file_count,
         result.block_count,
@@ -55,9 +55,9 @@ module Xerp::CLI
       )
 
       if json_output
-        puts JsonFormatter.format_headers(result_with_timing)
+        puts JsonFormatter.format_outline(result_with_timing)
       else
-        puts HumanFormatter.format_headers(result_with_timing)
+        puts HumanFormatter.format_outline(result_with_timing)
       end
 
       0
@@ -66,7 +66,7 @@ module Xerp::CLI
       1
     end
 
-    private def self.fetch_headers(db : DB::Database, file_pattern : String?, max_level : Int32) : HeadersResult
+    private def self.fetch_headers(db : DB::Database, file_pattern : String?, max_level : Int32) : OutlineResult
       entries = [] of HeaderEntry
 
       # Only show blocks that have children (parent blocks = actual headers)
@@ -102,7 +102,7 @@ module Xerp::CLI
       # Count unique files
       file_count = entries.map(&.file_path).uniq.size
 
-      HeadersResult.new(entries, file_count, entries.size, 0_i64)
+      OutlineResult.new(entries, file_count, entries.size, 0_i64)
     end
   end
 end

@@ -276,11 +276,11 @@ module Xerp::CLI::HumanFormatter
     output.to_s
   end
 
-  # Formats headers listing for human reading.
-  def self.format_headers(result : HeadersCommand::HeadersResult) : String
+  # Formats outline listing for human reading.
+  def self.format_outline(result : OutlineCommand::OutlineResult) : String
     output = String::Builder.new
 
-    output << "xerp headers: "
+    output << "xerp outline: "
     output << result.block_count
     output << " blocks in "
     output << result.file_count
@@ -289,7 +289,7 @@ module Xerp::CLI::HumanFormatter
     output << "ms)\n"
 
     if result.entries.empty?
-      output << "\nNo headers found.\n"
+      output << "\nNo blocks found.\n"
       return output.to_s
     end
 
