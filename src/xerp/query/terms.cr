@@ -102,20 +102,24 @@ module Xerp::Query::Terms
 
     return [] of SalientTerm if query_token_ids.empty?
 
-    # Accumulate neighbor scores
+    # Accumulate neighbor scores from all available models
     # token_id -> {score_sum, term_text}
     score_acc = Hash(Int64, {Float64, String}).new
 
-    # Pick which model to use (prefer line, fall back to scope)
-    model = has_line ? Vectors::Cooccurrence::MODEL_LINE : Vectors::Cooccurrence::MODEL_SCOPE
+    # Use both line and scope models when available (they complement each other)
+    models_to_use = [] of String
+    models_to_use << Vectors::Cooccurrence::MODEL_LINE if has_line
+    models_to_use << Vectors::Cooccurrence::MODEL_SCOPE if has_scope
 
     query_token_ids.each do |token_id|
-      neighbors = get_neighbors_simple(db, token_id, model, opts.top_k_terms, opts.max_df_percent)
-      neighbors.each do |n|
-        if existing = score_acc[n[:token_id]]?
-          score_acc[n[:token_id]] = {existing[0] + n[:score], existing[1]}
-        else
-          score_acc[n[:token_id]] = {n[:score], n[:token]}
+      models_to_use.each do |model|
+        neighbors = get_neighbors_simple(db, token_id, model, opts.top_k_terms, opts.max_df_percent)
+        neighbors.each do |n|
+          if existing = score_acc[n[:token_id]]?
+            score_acc[n[:token_id]] = {existing[0] + n[:score], existing[1]}
+          else
+            score_acc[n[:token_id]] = {n[:score], n[:token]}
+          end
         end
       end
     end
