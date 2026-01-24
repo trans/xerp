@@ -31,6 +31,10 @@ query expansion and term discovery.
 Record feedback on search results. Helps improve future searches by
 learning which results are useful.
 .TP
+.B headers
+List block headers from indexed files. Shows the structural outline
+of code (modules, classes, functions) with line numbers.
+.TP
 .B version
 Show version information.
 .TP
@@ -153,6 +157,16 @@ Mark result as not useful.
 .TP
 .B \-\-note \fItext\fR
 Add a note to the feedback.
+.SH HEADERS OPTIONS
+.TP
+.B \-\-file \fIglob\fR
+Filter by file path glob pattern (e.g., "src/**/*.cr").
+.TP
+.B \-\-level \fIn\fR
+Number of nesting levels to show. Default: 2.
+.TP
+.B \-\-json
+Output as JSON.
 .SH EXAMPLES
 Index the current directory:
 .PP
@@ -200,6 +214,16 @@ Mark a result as useful:
 .RS
 .nf
 xerp mark abc123 --useful
+.fi
+.RE
+.PP
+List code structure outline:
+.PP
+.RS
+.nf
+xerp headers
+xerp headers --file 'src/**/*.cr'
+xerp headers --level 3
 .fi
 .RE
 .SH FILES
