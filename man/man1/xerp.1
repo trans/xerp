@@ -1,0 +1,221 @@
+.TH XERP 1 "January 2026" "xerp 0.2.0" "User Commands"
+.SH NAME
+xerp \- intent-first search for code and text
+.SH SYNOPSIS
+.B xerp
+.I command
+.RI [ options ]
+.SH DESCRIPTION
+.B xerp
+is an intent-first code search tool that indexes your codebase and finds
+code by meaning, not just keywords. It uses token co-occurrence vectors
+to understand relationships between terms and expand queries semantically.
+.SH COMMANDS
+.TP
+.B index
+Index workspace files. Creates a searchable database of tokens, blocks,
+and file metadata.
+.TP
+.B query\fR, \fBq
+Search indexed content. Returns ranked code blocks matching your intent.
+.TP
+.B terms
+Find related terms for a query. Useful for discovering vocabulary and
+understanding what terms are associated with a concept.
+.TP
+.B train
+Train semantic token vectors. Builds co-occurrence models that power
+query expansion and term discovery.
+.TP
+.B mark
+Record feedback on search results. Helps improve future searches by
+learning which results are useful.
+.TP
+.B version
+Show version information.
+.TP
+.B help
+Show usage information.
+.SH INDEX OPTIONS
+.TP
+.B \-\-root \fIpath\fR
+Workspace root directory. Defaults to current directory.
+.TP
+.B \-\-rebuild
+Force full reindex, ignoring cached state.
+.TP
+.B \-\-train
+Train semantic vectors after indexing.
+.TP
+.B \-\-json
+Output statistics as JSON.
+.SH QUERY OPTIONS
+.TP
+.B \-\-top \fIn\fR
+Number of results to return. Default: 10.
+.TP
+.B \-\-context \fIn\fR, \fB\-C \fIn\fR
+Lines of context around matching lines. Default: 2.
+.TP
+.B \-\-max\-block\-lines \fIn\fR
+Maximum lines per result block. Default: 24.
+.TP
+.B \-\-file \fIregex\fR
+Filter results by file path pattern.
+.TP
+.B \-\-type \fItype\fR
+Filter by file type: code, markdown, config, or text.
+.TP
+.B \-\-no\-ancestry
+Hide block ancestry chain (parent modules/classes/functions).
+.TP
+.B \-\-explain
+Show token contribution scores for debugging.
+.TP
+.B \-\-json
+Full JSON output.
+.TP
+.B \-\-jsonl
+One JSON object per result (streaming).
+.TP
+.B \-\-grep
+Compact grep-like output.
+.SH TERMS OPTIONS
+.TP
+.B \-\-source \fIsource\fR
+Term extraction source:
+.RS
+.TP
+.B scope
+Query-time salience from matching scopes (default component of combined).
+.TP
+.B line
+Line vector model only (textual proximity).
+.TP
+.B block
+Block vector model only (structural siblings).
+.TP
+.B vector
+Both line and block models combined.
+.TP
+.B combined
+RRF merge of scope and vector sources (default).
+.RE
+.TP
+.B \-\-top \fIn\fR
+Number of terms to return. Default: 30.
+.TP
+.B \-\-max\-df \fIpercent\fR
+Filter terms appearing in more than this percentage of files. Default: 22.
+.TP
+.B \-\-json
+Output as JSON.
+.SH TRAIN OPTIONS
+.TP
+.B \-\-model \fImodel\fR
+Model to train:
+.RS
+.TP
+.B line
+Sliding window co-occurrence (textual proximity).
+.TP
+.B block
+Block-level co-occurrence (structural siblings).
+.TP
+.B all
+Train both models (default).
+.RE
+.TP
+.B \-\-window \fIn\fR
+Context window size in tokens. Default: 5.
+.TP
+.B \-\-min\-count \fIn\fR
+Minimum co-occurrence count to include. Default: 3.
+.TP
+.B \-\-top\-neighbors \fIn\fR
+Maximum neighbors per token. Default: 32.
+.TP
+.B \-\-clear
+Clear existing vectors without retraining.
+.TP
+.B \-\-json
+Output statistics as JSON.
+.SH MARK OPTIONS
+.TP
+.B \-\-useful
+Mark result as useful.
+.TP
+.B \-\-promising
+Mark result as a promising lead.
+.TP
+.B \-\-not\-useful
+Mark result as not useful.
+.TP
+.B \-\-note \fItext\fR
+Add a note to the feedback.
+.SH EXAMPLES
+Index the current directory:
+.PP
+.RS
+.nf
+xerp index
+.fi
+.RE
+.PP
+Index and train vectors in one step:
+.PP
+.RS
+.nf
+xerp index --train
+.fi
+.RE
+.PP
+Search for retry logic:
+.PP
+.RS
+.nf
+xerp query "retry with backoff"
+.fi
+.RE
+.PP
+Find terms related to "database":
+.PP
+.RS
+.nf
+xerp terms database
+xerp terms database --source block
+.fi
+.RE
+.PP
+Train only the line model:
+.PP
+.RS
+.nf
+xerp train --model line
+.fi
+.RE
+.PP
+Mark a result as useful:
+.PP
+.RS
+.nf
+xerp mark abc123 --useful
+.fi
+.RE
+.SH FILES
+.TP
+.I .cache/xerp.db
+SQLite database containing the index and trained vectors.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Error occurred.
+.SH AUTHORS
+Written by Trans.
+.SH SEE ALSO
+.BR grep (1),
+.BR ripgrep (1),
+.BR ctags (1)
