@@ -247,16 +247,25 @@ module Xerp::CLI::HumanFormatter
   def self.format_terms(result : Query::Terms::TermsResult) : String
     output = String::Builder.new
 
+    source_name = case result.source
+                  when Query::Terms::Source::Scope    then "scope"
+                  when Query::Terms::Source::Vector   then "vector"
+                  when Query::Terms::Source::Combined then "combined"
+                  else                                     "unknown"
+                  end
+
     output << "xerp terms: \""
     output << truncate(result.query, 40)
     output << "\" ("
+    output << source_name
+    output << ", "
     output << result.terms.size
     output << " terms, "
     output << result.timing_ms
     output << "ms)\n\n"
 
     if result.terms.empty?
-      output << "No salient terms found.\n"
+      output << "No terms found.\n"
       return output.to_s
     end
 

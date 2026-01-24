@@ -13,10 +13,21 @@ module Xerp::CLI
       root = result["root"]?.try(&.as_s) || Dir.current
       root = File.expand_path(root)
       query = result["query"]?.try(&.as_s) || ""
+      source_arg = result["source"]?.try(&.as_s) || "combined"
       top_blocks = result["top-blocks"]?.try(&.as_i) || 20
       top_terms = result["top"]?.try(&.as_i) || 30
-      max_df_percent = result["max-df"]?.try(&.as_f) || 40.0
+      max_df_percent = result["max-df"]?.try(&.as_f) || 22.0
       json_output = result["json"]?.try(&.as_bool) || false
+
+      # Parse source
+      source = case source_arg.downcase
+               when "scope"    then Query::Terms::Source::Scope
+               when "vector"   then Query::Terms::Source::Vector
+               when "combined" then Query::Terms::Source::Combined
+               else
+                 STDERR.puts "Error: Invalid source '#{source_arg}'. Use: scope, vector, or combined"
+                 return 1
+               end
 
       if query.empty?
         STDERR.puts "Error: Query is required"
@@ -46,11 +57,12 @@ module Xerp::CLI
             return 1
           end
 
-          # Expand tokens
+          # Expand tokens (needed for scope mode)
           expanded = Query::Expansion.expand(db, query_tokens)
 
-          # Extract salient terms
+          # Extract terms
           opts = Query::Terms::TermsOptions.new(
+            source: source,
             top_k_blocks: top_blocks,
             top_k_terms: top_terms,
             max_df_percent: max_df_percent
@@ -58,7 +70,7 @@ module Xerp::CLI
           terms = Query::Terms.extract(db, query_tokens, expanded, opts)
 
           elapsed = (Time.monotonic - start_time).total_milliseconds.to_i64
-          terms_result = Query::Terms::TermsResult.new(query, terms, elapsed)
+          terms_result = Query::Terms::TermsResult.new(query, terms, elapsed, source)
         end
 
         if tr = terms_result

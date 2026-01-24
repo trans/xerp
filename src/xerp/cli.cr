@@ -6,7 +6,6 @@ require "./cli/index_command"
 require "./cli/query_command"
 require "./cli/mark_command"
 require "./cli/train_command"
-require "./cli/neighbors_command"
 require "./cli/terms_command"
 
 module Xerp::CLI
@@ -175,69 +174,18 @@ module Xerp::CLI
     }
   })
 
-  NEIGHBORS_SCHEMA = %({
-    "type": "object",
-    "description": "Show nearest neighbors for a token",
-    "positional": ["token"],
-    "properties": {
-      "token": {
-        "type": "string",
-        "description": "Token to look up"
-      },
-      "root": {
-        "type": "string",
-        "description": "Workspace root directory"
-      },
-      "model": {
-        "type": "string",
-        "description": "Model to query: line, heir, scope, or blend (line+heir with reranking)"
-      },
-      "w-line": {
-        "type": "number",
-        "default": 0.6,
-        "description": "Weight for linear model similarity in blend mode"
-      },
-      "w-heir": {
-        "type": "number",
-        "default": 0.4,
-        "description": "Weight for hierarchical model similarity in blend mode"
-      },
-      "w-idf": {
-        "type": "number",
-        "default": 0.1,
-        "description": "Weight for IDF boost in blend mode"
-      },
-      "w-feedback": {
-        "type": "number",
-        "default": 0.2,
-        "description": "Weight for feedback boost in blend mode"
-      },
-      "top": {
-        "type": "integer",
-        "default": 20,
-        "description": "Number of neighbors to show"
-      },
-      "max-df": {
-        "type": "number",
-        "default": 22,
-        "description": "Max df% to include (e.g., 22 = filter terms in >22% of files)"
-      },
-      "json": {
-        "type": "boolean",
-        "description": "Output as JSON"
-      }
-    },
-    "required": ["token"]
-  })
-
   TERMS_SCHEMA = %({
     "type": "object",
-    "description": "Extract salient terms from matching scopes",
+    "description": "Extract related terms for a query",
     "positional": ["query"],
     "properties": {
       "query": {
         "type": "string",
         "description": "Search query"
+      },
+      "source": {
+        "type": "string",
+        "description": "Term source: scope (matching blocks), vector (trained), combined (both, default)"
       },
       "root": {
         "type": "string",
@@ -251,7 +199,7 @@ module Xerp::CLI
       "top-blocks": {
         "type": "integer",
         "default": 20,
-        "description": "Number of blocks to analyze"
+        "description": "Number of blocks to analyze (scope mode)"
       },
       "max-df": {
         "type": "number",
@@ -284,7 +232,6 @@ module Xerp::CLI
     cli.subcommand("q", QUERY_SCHEMA)  # alias
     cli.subcommand("mark", MARK_SCHEMA)
     cli.subcommand("train", TRAIN_SCHEMA)
-    cli.subcommand("neighbors", NEIGHBORS_SCHEMA)
     cli.subcommand("terms", TERMS_SCHEMA)
     cli.default_subcommand("query")
 
@@ -304,8 +251,6 @@ module Xerp::CLI
       MarkCommand.run(result)
     when "train"
       TrainCommand.run(result)
-    when "neighbors"
-      NeighborsCommand.run(result)
     when "terms"
       TermsCommand.run(result)
     else
@@ -320,23 +265,21 @@ module Xerp::CLI
     puts "Usage: xerp <command> [options]"
     puts
     puts "Commands:"
-    puts "  index      Index workspace files"
-    puts "  query      Search indexed content (alias: q)"
-    puts "  terms      Extract salient terms from matching scopes"
-    puts "  mark       Record feedback on results"
-    puts "  train      Train semantic token vectors"
-    puts "  neighbors  Show nearest neighbors for a token"
-    puts "  version    Show version"
-    puts "  help       Show this help"
+    puts "  index    Index workspace files"
+    puts "  query    Search indexed content (alias: q)"
+    puts "  terms    Find related terms (scope, vector, or combined)"
+    puts "  mark     Record feedback on results"
+    puts "  train    Train semantic token vectors"
+    puts "  version  Show version"
+    puts "  help     Show this help"
     puts
     puts "Examples:"
-    puts "  xerp index                    # Index current directory"
-    puts "  xerp index --train            # Index and train vectors"
-    puts "  xerp query \"retry backoff\"    # Search for intent"
-    puts "  xerp q \"error handling\" --top 5"
-    puts "  xerp mark abc123 --useful     # Mark result as useful"
-    puts "  xerp train                    # Train semantic vectors"
-    puts "  xerp neighbors retry --top 10 # Show similar tokens"
-    puts "  xerp terms retry              # Find related vocabulary"
+    puts "  xerp index                        # Index current directory"
+    puts "  xerp index --train                # Index and train vectors"
+    puts "  xerp query \"retry backoff\"        # Search for intent"
+    puts "  xerp terms retry                  # Related terms (combined)"
+    puts "  xerp terms retry --source scope   # From matching blocks"
+    puts "  xerp terms retry --source vector  # From trained vectors"
+    puts "  xerp mark abc123 --useful         # Mark result as useful"
   end
 end

@@ -77,53 +77,40 @@ xerp query "QUERY" [OPTIONS]
 
 ### Semantic vectors
 
-Train token co-occurrence vectors for query expansion:
+Train token co-occurrence vectors for richer term discovery:
 
 ```sh
 xerp index --train         # index and train in one step
 xerp train                  # train vectors on existing index
-xerp train --model line     # train only sliding-window model
-xerp train --model heir     # train only hierarchical model
 ```
 
-### Explore token relationships
+### Find related terms
 
 ```sh
-xerp neighbors retry --top 10
+xerp terms retry                  # combined (default)
+xerp terms retry --source scope   # from matching blocks
+xerp terms retry --source vector  # from trained vectors
 ```
 
 Output:
 ```
-Neighbors for 'retry' (model: blend):
+xerp terms: "retry" (combined, 10 terms, 60ms)
 
-  1. max                           0.5225
-  2. connection                    0.5001
-  3. pool                          0.4903
-  4. attempts                      0.3307
-```
-
-### Extract salient terms
-
-Find vocabulary related to a query:
-
-```sh
-xerp terms "error handling" --top 20
-```
-
-Output:
-```
-xerp terms: "error handling" (20 terms, 43ms)
-
- rescue      7105.271
- exception   5338.703
- raise       4846.238
-*error       3864.714
-*handling    3503.015
+ pool        6238.636
+ connection  6144.448
+ max         2427.302
+ with_dummy  2358.442
+ attempts    1536.311
 
 * = query term
 ```
 
-Use `--max-df 40` to filter terms appearing in more than 40% of files (default).
+Sources:
+- **scope** - terms from blocks matching the query (works without training)
+- **vector** - terms from trained co-occurrence vectors (requires `xerp train`)
+- **combined** - both sources, with intersection boost (default)
+
+Use `--max-df 22` to filter terms appearing in more than 22% of files (default).
 
 ### Feedback
 

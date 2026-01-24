@@ -161,9 +161,17 @@ module Xerp::CLI::JsonFormatter
 
   # Formats salient terms as JSON (pretty-printed).
   def self.format_terms(result : Query::Terms::TermsResult) : String
+    source_name = case result.source
+                  when Query::Terms::Source::Scope    then "scope"
+                  when Query::Terms::Source::Vector   then "vector"
+                  when Query::Terms::Source::Combined then "combined"
+                  else                                     "unknown"
+                  end
+
     JSON.build(indent: "  ") do |json|
       json.object do
         json.field "query", result.query
+        json.field "source", source_name
         json.field "timing_ms", result.timing_ms
         json.field "terms" do
           json.array do
