@@ -15,6 +15,11 @@ shards install
 crystal build src/xerp.cr -o bin/xerp --release
 ```
 
+Optional: install man page
+```sh
+sudo cp man/man1/xerp.1 /usr/local/share/man/man1/
+```
+
 ## Usage
 
 ### Index your project
@@ -57,7 +62,7 @@ xerp: "retry with backoff" (2 results, 3ms)
 
 Results show the ancestry chain with line numbers and original indentation, so you can see exactly where the code lives in the file structure.
 
-### Options
+### Query options
 
 ```
 xerp query "QUERY" [OPTIONS]
@@ -82,33 +87,43 @@ Train token co-occurrence vectors for richer term discovery:
 ```sh
 xerp index --train         # index and train in one step
 xerp train                  # train vectors on existing index
+xerp train --model line     # train only the line model
+xerp train --model block    # train only the block model
 ```
+
+Two models are trained:
+- **line** - textual proximity (tokens that appear near each other)
+- **block** - structural siblings (methods in same class, classes in same file)
 
 ### Find related terms
 
 ```sh
 xerp terms retry                  # combined (default)
-xerp terms retry --source scope   # from matching blocks
-xerp terms retry --source vector  # from trained vectors
+xerp terms retry --source scope   # salience from matching scopes
+xerp terms retry --source line    # line vector model
+xerp terms retry --source block   # block vector model
+xerp terms retry --source vector  # both vector models
 ```
 
 Output:
 ```
-xerp terms: "retry" (combined, 10 terms, 60ms)
+xerp terms: "retry" (combined, 10 terms, 12ms)
 
- pool        6238.636
- connection  6144.448
- max         2427.302
- with_dummy  2358.442
- attempts    1536.311
+*retry        16.393
+ sleep        16.393
+ delay        15.873
+ backoff      15.625
+ attempts     15.385
 
 * = query term
 ```
 
 Sources:
-- **scope** - terms from blocks matching the query (works without training)
-- **vector** - terms from trained co-occurrence vectors (requires `xerp train`)
-- **combined** - both sources, with intersection boost (default)
+- **scope** - salience from blocks matching the query (works without training)
+- **line** - neighbors from line vector model (textual proximity)
+- **block** - neighbors from block vector model (structural siblings)
+- **vector** - both line and block models combined
+- **combined** - RRF merge of scope and vector sources (default)
 
 Use `--max-df 22` to filter terms appearing in more than 22% of files (default).
 
@@ -128,7 +143,25 @@ xerp mark RESULT_ID --promising --note "good lead"
 
 2. **Querying** - Your query is tokenized and matched against the index. Blocks are scored by token frequency, weighted by token rarity (TF-IDF style).
 
-3. **Results** - Matching blocks are returned with snippets showing hit context. The ancestry chain shows the full path from file root to the matched block.
+3. **Vector training** - Two co-occurrence models capture different relationships:
+   - *Line model*: Sliding window over tokens captures textual proximity
+   - *Block model*: Level-based isolation captures structural relationships (siblings co-occur, leaves stay isolated)
+
+4. **Term discovery** - Query expansion uses trained vectors to find semantically related terms, improving recall.
+
+5. **Results** - Matching blocks are returned with snippets showing hit context. The ancestry chain shows the full path from file root to the matched block.
+
+## Files
+
+- `.cache/xerp.db` - SQLite database with index and vectors
+
+## Documentation
+
+```sh
+man xerp           # if man page installed
+xerp help          # quick usage
+xerp --help        # same as above
+```
 
 ## Development
 
