@@ -162,6 +162,8 @@ module Xerp::CLI::JsonFormatter
   # Formats salient terms as JSON (pretty-printed).
   def self.format_terms(result : Query::Terms::TermsResult) : String
     source_name = case result.source
+                  when Query::Terms::Source::Blocks   then "blocks"
+                  when Query::Terms::Source::Line     then "line"
                   when Query::Terms::Source::Scope    then "scope"
                   when Query::Terms::Source::Vector   then "vector"
                   when Query::Terms::Source::Combined then "combined"

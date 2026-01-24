@@ -9,9 +9,11 @@ require "./types"
 module Xerp::Query::Terms
   # Source for term extraction
   enum Source
-    Scope    # From matching blocks (query-time)
-    Vector   # From trained vectors (pre-computed)
-    Combined # Both, with intersection boost
+    Blocks   # From matching blocks (query-time)
+    Line     # From line vector model only
+    Scope    # From scope vector model only
+    Vector   # From both vector models (line + scope)
+    Combined # RRF of blocks + vectors
   end
 
   # A term with its computed salience score.
@@ -22,7 +24,7 @@ module Xerp::Query::Terms
     getter is_query_term : Bool
     getter source : Source
 
-    def initialize(@term, @token_id, @salience, @is_query_term, @source = Source::Scope)
+    def initialize(@term, @token_id, @salience, @is_query_term, @source = Source::Blocks)
     end
   end
 
@@ -33,7 +35,7 @@ module Xerp::Query::Terms
     getter timing_ms : Int64
     getter source : Source
 
-    def initialize(@query, @terms, @timing_ms, @source = Source::Scope)
+    def initialize(@query, @terms, @timing_ms, @source = Source::Blocks)
     end
   end
 
@@ -67,14 +69,18 @@ module Xerp::Query::Terms
                    expanded_tokens : Hash(String, Array(Expansion::ExpandedToken)),
                    opts : TermsOptions) : Array(SalientTerm)
     case opts.source
+    when Source::Blocks
+      extract_from_blocks(db, query_tokens, expanded_tokens, opts)
+    when Source::Line
+      extract_from_model(db, query_tokens, opts, Vectors::Cooccurrence::MODEL_LINE)
     when Source::Scope
-      extract_from_scope(db, query_tokens, expanded_tokens, opts)
+      extract_from_model(db, query_tokens, opts, Vectors::Cooccurrence::MODEL_SCOPE)
     when Source::Vector
       extract_from_vectors(db, query_tokens, opts)
     when Source::Combined
       extract_combined(db, query_tokens, expanded_tokens, opts)
     else
-      extract_from_scope(db, query_tokens, expanded_tokens, opts)
+      extract_from_blocks(db, query_tokens, expanded_tokens, opts)
     end
   end
 
@@ -139,6 +145,64 @@ module Xerp::Query::Terms
     results.first(opts.top_k_terms)
   end
 
+  # Extracts terms from a single vector model.
+  def self.extract_from_model(db : DB::Database,
+                               query_tokens : Array(String),
+                               opts : TermsOptions,
+                               model : String) : Array(SalientTerm)
+    total_files = Store::Statements.file_count(db).to_f64
+    return [] of SalientTerm if total_files == 0
+
+    # Check if model is trained
+    return [] of SalientTerm unless Expansion.model_trained?(db, model)
+
+    # Build set of query token IDs
+    query_token_ids = Set(Int64).new
+    query_tokens.each do |token|
+      if row = Store::Statements.select_token_by_text(db, token)
+        query_token_ids << row.id
+      elsif row = Store::Statements.select_token_by_text(db, token.downcase)
+        query_token_ids << row.id
+      end
+    end
+
+    return [] of SalientTerm if query_token_ids.empty?
+
+    # Accumulate neighbor scores
+    score_acc = Hash(Int64, {Float64, String}).new
+
+    query_token_ids.each do |token_id|
+      neighbors = get_neighbors_simple(db, token_id, model, opts.top_k_terms, opts.max_df_percent)
+      neighbors.each do |n|
+        if existing = score_acc[n[:token_id]]?
+          score_acc[n[:token_id]] = {existing[0] + n[:score], existing[1]}
+        else
+          score_acc[n[:token_id]] = {n[:score], n[:token]}
+        end
+      end
+    end
+
+    # Determine source enum based on model
+    source = case model
+             when Vectors::Cooccurrence::MODEL_LINE  then Source::Line
+             when Vectors::Cooccurrence::MODEL_SCOPE then Source::Scope
+             else                                         Source::Vector
+             end
+
+    # Build results
+    results = score_acc.map do |token_id, (score, term)|
+      is_query_term = query_token_ids.includes?(token_id)
+      normalized_score = score * 1000.0
+      if is_query_term
+        normalized_score *= opts.query_term_boost
+      end
+      SalientTerm.new(term, token_id, normalized_score, is_query_term, source)
+    end
+
+    results.sort_by! { |t| -t.salience }
+    results.first(opts.top_k_terms)
+  end
+
   # Gets neighbors from a single model (bypasses blend_neighbors).
   private def self.get_neighbors_simple(db : DB::Database, token_id : Int64,
                                          model : String, limit : Int32,
@@ -190,7 +254,7 @@ module Xerp::Query::Terms
                             expanded_tokens : Hash(String, Array(Expansion::ExpandedToken)),
                             opts : TermsOptions) : Array(SalientTerm)
     # Get terms from both sources (already sorted by salience descending)
-    scope_terms = extract_from_scope(db, query_tokens, expanded_tokens, opts)
+    scope_terms = extract_from_blocks(db, query_tokens, expanded_tokens, opts)
     vector_terms = extract_from_vectors(db, query_tokens, opts)
 
     # If one source is empty, return the other
@@ -231,7 +295,7 @@ module Xerp::Query::Terms
 
   # Extracts the most salient terms from blocks matching a query.
   # salience(term) = Σ (block_score × tf(term, block)) × idf(term)
-  def self.extract_from_scope(db : DB::Database,
+  def self.extract_from_blocks(db : DB::Database,
                               query_tokens : Array(String),
                               expanded_tokens : Hash(String, Array(Expansion::ExpandedToken)),
                               opts : TermsOptions) : Array(SalientTerm)
@@ -330,7 +394,7 @@ module Xerp::Query::Terms
         salience *= opts.query_term_boost
       end
 
-      results << SalientTerm.new(term, token_id, salience, is_query_term, Source::Scope)
+      results << SalientTerm.new(term, token_id, salience, is_query_term, Source::Blocks)
     end
 
     # Sort by salience descending

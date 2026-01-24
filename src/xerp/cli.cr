@@ -185,7 +185,7 @@ module Xerp::CLI
       },
       "source": {
         "type": "string",
-        "description": "Term source: scope (matching blocks), vector (trained), combined (both, default)"
+        "description": "Term source: blocks, line, scope, vector (line+scope), combined (blocks+vector, default)"
       },
       "root": {
         "type": "string",
@@ -278,8 +278,10 @@ module Xerp::CLI
     puts "  xerp index --train                # Index and train vectors"
     puts "  xerp query \"retry backoff\"        # Search for intent"
     puts "  xerp terms retry                  # Related terms (combined)"
-    puts "  xerp terms retry --source scope   # From matching blocks"
-    puts "  xerp terms retry --source vector  # From trained vectors"
+    puts "  xerp terms retry --source blocks  # From matching blocks"
+    puts "  xerp terms retry --source line    # Line model only"
+    puts "  xerp terms retry --source scope   # Scope model only"
+    puts "  xerp terms retry --source vector  # Both line+scope models"
     puts "  xerp mark abc123 --useful         # Mark result as useful"
   end
 end

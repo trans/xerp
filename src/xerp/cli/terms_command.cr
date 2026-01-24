@@ -21,11 +21,13 @@ module Xerp::CLI
 
       # Parse source
       source = case source_arg.downcase
+               when "blocks"   then Query::Terms::Source::Blocks
+               when "line"     then Query::Terms::Source::Line
                when "scope"    then Query::Terms::Source::Scope
                when "vector"   then Query::Terms::Source::Vector
                when "combined" then Query::Terms::Source::Combined
                else
-                 STDERR.puts "Error: Invalid source '#{source_arg}'. Use: scope, vector, or combined"
+                 STDERR.puts "Error: Invalid source '#{source_arg}'. Use: blocks, line, scope, vector, or combined"
                  return 1
                end
 
