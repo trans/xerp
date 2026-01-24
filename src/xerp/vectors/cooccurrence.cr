@@ -431,14 +431,58 @@ module Xerp::Vectors
 
     # Computes top-K neighbors for all tokens using sparse matrix multiplication.
     # Uses inverted index to only compare tokens that share at least one context.
+    # Parallelized across CPU cores for speed.
     private def self.compute_all_neighbors_fast(vectors : Hash(Int64, Hash(Int64, Int64)),
                                                 inverted_index : Hash(Int64, Array({Int64, Int64})),
                                                 norms : Hash(Int64, Float64),
                                                 eligible_tokens : Set(Int64),
                                                 top_k : Int32) : Hash(Int64, Array({Int64, Float64}))
-      all_neighbors = Hash(Int64, Array({Int64, Float64})).new
+      token_array = eligible_tokens.to_a
+      return Hash(Int64, Array({Int64, Float64})).new if token_array.empty?
 
-      eligible_tokens.each do |token_id|
+      # Use multiple workers based on CPU count
+      num_workers = Math.max(1, System.cpu_count.to_i)
+      num_workers = Math.min(num_workers, token_array.size)
+
+      chunk_size = (token_array.size + num_workers - 1) // num_workers
+
+      # Channel to collect results from workers
+      result_channel = Channel(Hash(Int64, Array({Int64, Float64}))).new(num_workers)
+
+      # Spawn worker fibers
+      num_workers.times do |worker_idx|
+        start_idx = worker_idx * chunk_size
+        end_idx = Math.min(start_idx + chunk_size, token_array.size)
+        chunk = token_array[start_idx...end_idx]
+
+        spawn do
+          partial = compute_neighbors_for_chunk(chunk, vectors, inverted_index, norms, eligible_tokens, top_k)
+          result_channel.send(partial)
+        end
+      end
+
+      # Collect results from all workers
+      all_neighbors = Hash(Int64, Array({Int64, Float64})).new
+      num_workers.times do
+        partial = result_channel.receive
+        partial.each do |token_id, neighbors|
+          all_neighbors[token_id] = neighbors
+        end
+      end
+
+      all_neighbors
+    end
+
+    # Computes neighbors for a chunk of tokens (called by worker fibers).
+    private def self.compute_neighbors_for_chunk(token_ids : Array(Int64),
+                                                  vectors : Hash(Int64, Hash(Int64, Int64)),
+                                                  inverted_index : Hash(Int64, Array({Int64, Int64})),
+                                                  norms : Hash(Int64, Float64),
+                                                  eligible_tokens : Set(Int64),
+                                                  top_k : Int32) : Hash(Int64, Array({Int64, Float64}))
+      results = Hash(Int64, Array({Int64, Float64})).new
+
+      token_ids.each do |token_id|
         token_vec = vectors[token_id]?
         next unless token_vec
 
@@ -473,10 +517,10 @@ module Xerp::Vectors
 
         # Sort and take top-K
         similarities.sort_by! { |(_, sim)| -sim }
-        all_neighbors[token_id] = similarities.first(top_k)
+        results[token_id] = similarities.first(top_k)
       end
 
-      all_neighbors
+      results
     end
 
     # Batch insert all neighbors using a transaction for speed.
