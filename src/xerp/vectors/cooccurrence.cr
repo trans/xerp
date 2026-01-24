@@ -26,9 +26,22 @@ module Xerp::Vectors
       MODEL_SCOPE => 3,
     }
 
+    # Similarity quantization scale (16-bit precision)
+    SIMILARITY_SCALE = 65535.0
+
     # Gets model_id for a model name
     def self.model_id(model : String) : Int32
       MODEL_IDS[model]? || raise ArgumentError.new("Invalid model: #{model}")
+    end
+
+    # Quantizes similarity (0.0-1.0) to 16-bit integer
+    def self.quantize_similarity(similarity : Float64) : Int32
+      (similarity * SIMILARITY_SCALE).round.to_i32.clamp(0, 65535)
+    end
+
+    # Dequantizes 16-bit integer back to similarity (0.0-1.0)
+    def self.dequantize_similarity(quantized : Int32) : Float64
+      quantized.to_f64 / SIMILARITY_SCALE
     end
 
     # Default training parameters
@@ -624,7 +637,7 @@ module Xerp::Vectors
         all_neighbors.each do |token_id, neighbors|
           neighbors.each do |(neighbor_id, similarity)|
             db.exec("INSERT INTO token_neighbors (model_id, token_id, neighbor_id, similarity) VALUES (?, ?, ?, ?)",
-                    mid, token_id, neighbor_id, similarity)
+                    mid, token_id, neighbor_id, quantize_similarity(similarity))
             count += 1
           end
         end
@@ -642,7 +655,7 @@ module Xerp::Vectors
                                      token_id : Int64, neighbors : Array({Int64, Float64})) : Nil
       mid = model_id(model)
       neighbors.each do |(neighbor_id, similarity)|
-        db.exec(<<-SQL, mid, token_id, neighbor_id, similarity)
+        db.exec(<<-SQL, mid, token_id, neighbor_id, quantize_similarity(similarity))
           INSERT INTO token_neighbors (model_id, token_id, neighbor_id, similarity)
           VALUES (?, ?, ?, ?)
         SQL

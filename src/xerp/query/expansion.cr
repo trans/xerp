@@ -228,7 +228,10 @@ module Xerp::Query::Expansion
     neighbors = [] of NamedTuple(token: String, token_id: Int64, similarity: Float64, kind: Tokenize::TokenKind, df: Int32)
     mid = Vectors::Cooccurrence.model_id(model)
 
-    db.query(<<-SQL, mid, token_id, min_similarity, limit) do |rs|
+    # Convert min_similarity to quantized form for comparison
+    min_sim_quantized = Vectors::Cooccurrence.quantize_similarity(min_similarity)
+
+    db.query(<<-SQL, mid, token_id, min_sim_quantized, limit) do |rs|
       SELECT t.token, t.token_id, t.kind, t.df, n.similarity
       FROM token_neighbors n
       JOIN tokens t ON t.token_id = n.neighbor_id
@@ -244,8 +247,11 @@ module Xerp::Query::Expansion
         neighbor_id = rs.read(Int64)
         kind_str = rs.read(String)
         df = rs.read(Int32)
-        similarity = rs.read(Float64)
+        similarity_quantized = rs.read(Int32)
         kind = Tokenize.kind_from_s(kind_str)
+
+        # Dequantize similarity back to 0.0-1.0 range
+        similarity = Vectors::Cooccurrence.dequantize_similarity(similarity_quantized)
 
         neighbors << {
           token:      token,

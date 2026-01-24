@@ -2,7 +2,7 @@ require "sqlite3"
 
 module Xerp::Store
   module Migrations
-    CURRENT_VERSION = 6
+    CURRENT_VERSION = 7
 
     # Runs all pending migrations on the database.
     def self.migrate!(db : DB::Database) : Nil
@@ -35,6 +35,7 @@ module Xerp::Store
       when 4 then migrate_v4(db)
       when 5 then migrate_v5(db)
       when 6 then migrate_v6(db)
+      when 7 then migrate_v7(db)
       else        raise "Unknown migration version: #{version}"
       end
     end
@@ -377,6 +378,35 @@ module Xerp::Store
 
       db.exec "DROP TABLE token_vector_norms"
       db.exec "ALTER TABLE token_vector_norms_new RENAME TO token_vector_norms"
+    end
+
+    # Migration v7: Quantize similarity from REAL to INTEGER (16-bit precision)
+    # Saves ~2MB by storing similarity * 65535 as INTEGER instead of 8-byte REAL
+    private def self.migrate_v7(db : DB::Database) : Nil
+      # Recreate token_neighbors with INTEGER similarity
+      db.exec <<-SQL
+        CREATE TABLE token_neighbors_new (
+          model_id     INTEGER NOT NULL REFERENCES models(model_id),
+          token_id     INTEGER NOT NULL REFERENCES tokens(token_id) ON DELETE CASCADE,
+          neighbor_id  INTEGER NOT NULL REFERENCES tokens(token_id) ON DELETE CASCADE,
+          similarity   INTEGER NOT NULL,
+          PRIMARY KEY (model_id, token_id, neighbor_id)
+        )
+      SQL
+
+      # Convert REAL to INTEGER (multiply by 65535)
+      db.exec <<-SQL
+        INSERT INTO token_neighbors_new (model_id, token_id, neighbor_id, similarity)
+        SELECT model_id, token_id, neighbor_id, CAST(similarity * 65535 AS INTEGER)
+        FROM token_neighbors
+      SQL
+
+      db.exec "DROP TABLE token_neighbors"
+      db.exec "ALTER TABLE token_neighbors_new RENAME TO token_neighbors"
+      db.exec <<-SQL
+        CREATE INDEX idx_token_neighbors_model_similarity
+        ON token_neighbors(model_id, token_id, similarity DESC)
+      SQL
     end
   end
 end
