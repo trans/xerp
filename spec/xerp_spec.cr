@@ -73,7 +73,7 @@ describe Xerp::Config do
   it "creates config with default db path" do
     config = Xerp::Config.new("/tmp/myproject")
     config.workspace_root.should eq("/tmp/myproject")
-    config.db_path.should eq("/tmp/myproject/.xerp/index.db")
+    config.db_path.should eq("/tmp/myproject/.cache/xerp.db")
   end
 
   it "accepts custom db path" do

@@ -29,7 +29,7 @@ module Xerp::Index
     @tokenizer : Tokenize::Tokenizer
 
     def initialize(@config : Config)
-      @config.ensure_xerp_dir!
+      @config.ensure_cache_dir!
       @database = Store::Database.new(@config.db_path)
       @tokenizer = Tokenize::Tokenizer.new(@config.max_token_len)
     end

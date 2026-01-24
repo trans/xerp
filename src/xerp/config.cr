@@ -22,7 +22,7 @@ module Xerp
     property window_overlap : Int32 = 10
 
     def initialize(@workspace_root : String, db_path : String? = nil)
-      @db_path = db_path || File.join(@workspace_root, ".xerp", "index.db")
+      @db_path = db_path || File.join(@workspace_root, ".cache", "xerp.db")
     end
 
     # Creates a Config from environment variables and defaults.
@@ -32,14 +32,14 @@ module Xerp
       new(root, db)
     end
 
-    # Returns the .xerp directory path.
-    def xerp_dir : String
+    # Returns the cache directory path.
+    def cache_dir : String
       File.dirname(db_path)
     end
 
-    # Ensures the .xerp directory exists.
-    def ensure_xerp_dir! : Nil
-      Dir.mkdir_p(xerp_dir)
+    # Ensures the cache directory exists.
+    def ensure_cache_dir! : Nil
+      Dir.mkdir_p(cache_dir)
     end
   end
 end

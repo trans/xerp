@@ -2,5 +2,5 @@
 /lib/
 /bin/
 /.shards/
-/.xerp/
+/.cache/
 *.dwarf

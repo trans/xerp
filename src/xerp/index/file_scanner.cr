@@ -23,11 +23,11 @@ module Xerp::Index
   class FileScanner
     # Default directories to ignore.
     DEFAULT_IGNORE_DIRS = Set{
-      ".git", ".xerp", ".hg", ".svn",
-      "node_modules", "vendor", "deps",
+      ".git", ".cache", ".local", ".hg", ".svn",
+      "node_modules", "vendor", "deps", "lib",
       "target", "build", "dist", "out", "_build",
       "__pycache__", ".pytest_cache", ".mypy_cache",
-      ".idea", ".vscode", ".vs",
+      ".idea", ".vscode", ".vs", ".claude",
       "coverage", ".nyc_output",
       "tmp", "temp", "cache",
     }
