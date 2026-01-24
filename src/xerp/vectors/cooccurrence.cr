@@ -203,9 +203,10 @@ module Xerp::Vectors
       pairs
     end
 
-    # Counts scope-based co-occurrences using shallow outline.
-    # For each block: header + direct children (level+1) + footer
-    # No deeply nested content - each line belongs to one scope only.
+    # Counts scope-based co-occurrences using level isolation.
+    # - Leaf blocks: sweep their content in isolation
+    # - Non-leaf blocks: sweep headers of direct children together (siblings co-occur)
+    # - File-level: sweep headers of top-level blocks together
     private def self.count_scope_pairs(db : DB::Database,
                                        model : String,
                                        file_id : Int64,
@@ -217,40 +218,53 @@ module Xerp::Vectors
       # Group postings by line number
       postings_by_line = group_postings_by_line(postings)
 
-      # Build a map of line -> indent level
-      line_levels = get_line_levels(db, file_id)
+      # Build block lookup and parent-children map
+      block_by_id = Hash(Int64, FileBlockWithParent).new
+      children_by_parent = Hash(Int64?, Array(FileBlockWithParent)).new { |h, k| h[k] = [] of FileBlockWithParent }
+
+      blocks.each do |block|
+        block_by_id[block.block_id] = block
+        children_by_parent[block.parent_block_id] << block
+      end
 
       # Accumulate all counts in memory
       counts = Hash({Int64, Int64}, Float64).new(0.0)
 
+      # Process each block
       blocks.each do |block|
-        block_level = block.level
+        children = children_by_parent[block.block_id]?
 
-        # Collect tokens for this block's shallow outline:
-        # - Header (start_line)
-        # - Direct children (lines at level+1)
-        # - Footer (end_line, if different from start)
-        outline_tokens = [] of Int64
-
-        (block.start_line..block.end_line).each do |line_num|
-          line_level = line_levels[line_num]? || 0
-
-          # Include if: header, footer, or direct child (exactly one level deeper)
-          is_header = (line_num == block.start_line)
-          is_footer = (line_num == block.end_line)
-          is_direct_child = (line_level == block_level + 1)
-
-          if is_header || is_footer || is_direct_child
+        if children.nil? || children.empty?
+          # Leaf block: sweep all content
+          leaf_tokens = [] of Int64
+          (block.start_line..block.end_line).each do |line_num|
             if line_tokens = postings_by_line[line_num]?
-              outline_tokens.concat(line_tokens)
+              leaf_tokens.concat(line_tokens)
             end
           end
+          count_window_pairs_weighted(leaf_tokens, window_size, 1.0, counts) unless leaf_tokens.empty?
+        else
+          # Non-leaf: sweep headers of direct children together
+          sibling_tokens = [] of Int64
+          children.each do |child|
+            if header_tokens = postings_by_line[child.start_line]?
+              sibling_tokens.concat(header_tokens)
+            end
+          end
+          count_window_pairs_weighted(sibling_tokens, window_size, 1.0, counts) unless sibling_tokens.empty?
         end
+      end
 
-        next if outline_tokens.empty?
-
-        # Run windowed co-occurrence on the outline
-        count_window_pairs_weighted(outline_tokens, window_size, 1.0, counts)
+      # File-level: sweep headers of top-level blocks (parent_id = nil)
+      top_level = children_by_parent[nil]?
+      if top_level && top_level.size > 1
+        file_level_tokens = [] of Int64
+        top_level.each do |block|
+          if header_tokens = postings_by_line[block.start_line]?
+            file_level_tokens.concat(header_tokens)
+          end
+        end
+        count_window_pairs_weighted(file_level_tokens, window_size, 1.0, counts) unless file_level_tokens.empty?
       end
 
       # Upsert all counts to database

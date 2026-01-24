@@ -85,9 +85,10 @@ module Xerp::Query::Terms
     total_files = Store::Statements.file_count(db).to_f64
     return [] of SalientTerm if total_files == 0
 
-    # Only use line model for vector terms (heir model creates spurious associations)
+    # Use line or scope model (heir model creates spurious associations)
     has_line = Expansion.model_trained?(db, Vectors::Cooccurrence::MODEL_LINE)
-    return [] of SalientTerm unless has_line
+    has_scope = Expansion.model_trained?(db, Vectors::Cooccurrence::MODEL_SCOPE)
+    return [] of SalientTerm unless has_line || has_scope
 
     # Build set of query token IDs
     query_token_ids = Set(Int64).new
@@ -105,10 +106,11 @@ module Xerp::Query::Terms
     # token_id -> {score_sum, term_text}
     score_acc = Hash(Int64, {Float64, String}).new
 
-    weights = Expansion::BlendWeights.new
+    # Pick which model to use (prefer line, fall back to scope)
+    model = has_line ? Vectors::Cooccurrence::MODEL_LINE : Vectors::Cooccurrence::MODEL_SCOPE
+
     query_token_ids.each do |token_id|
-      neighbors = Expansion.blend_neighbors(db, token_id, opts.top_k_terms, 0.0,
-                                            has_line, false, weights, opts.max_df_percent)
+      neighbors = get_neighbors_simple(db, token_id, model, opts.top_k_terms, opts.max_df_percent)
       neighbors.each do |n|
         if existing = score_acc[n[:token_id]]?
           score_acc[n[:token_id]] = {existing[0] + n[:score], existing[1]}
@@ -131,6 +133,46 @@ module Xerp::Query::Terms
 
     results.sort_by! { |t| -t.salience }
     results.first(opts.top_k_terms)
+  end
+
+  # Gets neighbors from a single model (bypasses blend_neighbors).
+  private def self.get_neighbors_simple(db : DB::Database, token_id : Int64,
+                                         model : String, limit : Int32,
+                                         max_df_percent : Float64) : Array(NamedTuple(token: String, token_id: Int64, score: Float64))
+    mid = Vectors::Cooccurrence.model_id(model)
+    total_files = Math.max(Store::Statements.file_count(db).to_f64, 1.0)
+
+    results = [] of NamedTuple(token: String, token_id: Int64, score: Float64)
+
+    db.query(<<-SQL, mid, token_id, limit * 2) do |rs|
+      SELECT t.token, t.token_id, t.kind, t.df, n.similarity
+      FROM token_neighbors n
+      JOIN tokens t ON t.token_id = n.neighbor_id
+      WHERE n.model_id = ?
+        AND n.token_id = ?
+        AND t.kind IN ('ident', 'word', 'compound')
+      ORDER BY n.similarity DESC
+      LIMIT ?
+    SQL
+      rs.each do
+        token = rs.read(String)
+        neighbor_id = rs.read(Int64)
+        kind_str = rs.read(String)
+        df = rs.read(Int32)
+        similarity_quantized = rs.read(Int32)
+
+        # Filter by max_df_percent
+        df_percent = (df.to_f64 / total_files) * 100.0
+        next if df_percent > max_df_percent
+
+        # Dequantize and use as score
+        similarity = Vectors::Cooccurrence.dequantize_similarity(similarity_quantized)
+
+        results << {token: token, token_id: neighbor_id, score: similarity}
+      end
+    end
+
+    results.first(limit)
   end
 
   # Reciprocal Rank Fusion constant (standard value from literature)
