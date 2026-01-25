@@ -104,6 +104,11 @@ module Xerp::Query::Snippet
       return extract_range(file_lines, block_start, block_end)
     end
 
+    # Convert hit_lines to 0-indexed for internal use
+    valid_hits = hit_lines.select { |l| l >= block_start + 1 && l <= block_end + 1 }
+                          .map { |l| l - 1 }
+                          .to_set
+
     # Build regions: header + hit clusters
     regions = build_regions(hit_lines, block_start, block_end, context_lines)
 
@@ -130,8 +135,8 @@ module Xerp::Query::Snippet
       regions[0] = Region.new(block_start, regions.first.end_line)
     end
 
-    # Trim regions to fit within max_lines
-    regions = trim_to_max_lines(regions, max_lines)
+    # Trim regions to fit within max_lines, preserving hit lines
+    regions = trim_to_max_lines(regions, max_lines, valid_hits)
 
     # Build output with ellipsis between non-contiguous regions
     build_output_with_ellipsis(file_lines, regions)
@@ -191,38 +196,87 @@ module Xerp::Query::Snippet
     merged
   end
 
-  # Trims regions to fit within max_lines total.
-  private def self.trim_to_max_lines(regions : Array(Region), max_lines : Int32) : Array(Region)
+  # Trims regions to fit within max_lines total, preserving hit lines.
+  private def self.trim_to_max_lines(regions : Array(Region), max_lines : Int32, hit_lines : Set(Int32)) : Array(Region)
     regions = merge_regions(regions)
     total_lines = regions.sum { |r| r.end_line - r.start_line + 1 }
 
     return regions if total_lines <= max_lines
 
-    # Trim from the end of each region proportionally, but preserve at least 1 line
+    # For each region, find the hit lines it contains
+    # Trim context around hits, but always keep the hits themselves
     result = [] of Region
     remaining = max_lines
 
     regions.each_with_index do |region, idx|
       region_lines = region.end_line - region.start_line + 1
 
+      # Find hits within this region
+      region_hits = (region.start_line..region.end_line).select { |l| hit_lines.includes?(l) }
+
       if idx == regions.size - 1
         # Last region gets whatever is left
         if remaining > 0
-          result << Region.new(region.start_line, Math.min(region.end_line, region.start_line + remaining - 1))
+          new_region = trim_region_preserving_hits(region, remaining, region_hits)
+          result << new_region if new_region
+          remaining -= (new_region.end_line - new_region.start_line + 1) if new_region
         end
       else
-        # Give this region its share (at least 2 lines if possible for context)
-        share = Math.max(2, (region_lines * max_lines) // total_lines)
+        # Give this region its share (at least enough for hits + 1 context each side)
+        min_for_hits = region_hits.empty? ? 1 : region_hits.size
+        share = Math.max(min_for_hits, (region_lines * max_lines) // total_lines)
         share = Math.min(share, remaining - (regions.size - idx - 1))  # Leave room for others
         share = Math.min(share, region_lines)  # Don't exceed actual region size
         share = Math.max(1, share)  # At least 1 line
 
-        result << Region.new(region.start_line, region.start_line + share - 1)
-        remaining -= share
+        new_region = trim_region_preserving_hits(region, share, region_hits)
+        if new_region
+          result << new_region
+          remaining -= (new_region.end_line - new_region.start_line + 1)
+        end
       end
     end
 
     result.reject { |r| r.end_line < r.start_line }
+  end
+
+  # Trims a region to fit within max_lines while preserving hit lines.
+  # Returns a new region centered on hits if possible.
+  private def self.trim_region_preserving_hits(region : Region, max_lines : Int32, hits : Array(Int32)) : Region?
+    region_lines = region.end_line - region.start_line + 1
+    return region if region_lines <= max_lines
+
+    if hits.empty?
+      # No hits in this region (e.g., header region) - just take the start
+      return Region.new(region.start_line, region.start_line + max_lines - 1)
+    end
+
+    # Find the range that covers all hits
+    hit_start = hits.min
+    hit_end = hits.max
+    hit_span = hit_end - hit_start + 1
+
+    if hit_span >= max_lines
+      # Hits span more than max_lines - just show the hits
+      return Region.new(hit_start, hit_start + max_lines - 1)
+    end
+
+    # Distribute remaining lines as context around hits
+    extra = max_lines - hit_span
+    before = extra // 2
+    after = extra - before
+
+    new_start = Math.max(region.start_line, hit_start - before)
+    new_end = Math.min(region.end_line, hit_end + after)
+
+    # Adjust if we hit region boundaries
+    if new_start == region.start_line && new_end < hit_end + after
+      new_end = Math.min(region.end_line, new_start + max_lines - 1)
+    elsif new_end == region.end_line && new_start > hit_start - before
+      new_start = Math.max(region.start_line, new_end - max_lines + 1)
+    end
+
+    Region.new(new_start, new_end)
   end
 
   # Builds output string with ellipsis between non-contiguous regions.
