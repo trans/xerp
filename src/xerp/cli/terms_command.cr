@@ -17,17 +17,19 @@ module Xerp::CLI
       top_blocks = result["top-blocks"]?.try(&.as_i) || 20
       top_terms = result["top"]?.try(&.as_i) || 30
       max_df_percent = result["max-df"]?.try(&.as_f) || 22.0
+      line_context = result["context"]?.try(&.as_i) || 2
       json_output = result["json"]?.try(&.as_bool) || false
 
       # Parse source
       source = case source_arg.downcase
-               when "scope"    then Query::Terms::Source::Scope
-               when "line"     then Query::Terms::Source::Line
-               when "block"    then Query::Terms::Source::Block
-               when "vector"   then Query::Terms::Source::Vector
-               when "combined" then Query::Terms::Source::Combined
+               when "scope"                      then Query::Terms::Source::Scope
+               when "linesalience", "proximity"  then Query::Terms::Source::LineSalience
+               when "line"                       then Query::Terms::Source::Line
+               when "block"                      then Query::Terms::Source::Block
+               when "vector"                     then Query::Terms::Source::Vector
+               when "combined"                   then Query::Terms::Source::Combined
                else
-                 STDERR.puts "Error: Invalid source '#{source_arg}'. Use: scope, line, block, vector, or combined"
+                 STDERR.puts "Error: Invalid source '#{source_arg}'. Use: scope, linesalience, line, block, vector, or combined"
                  return 1
                end
 
@@ -67,7 +69,8 @@ module Xerp::CLI
             source: source,
             top_k_blocks: top_blocks,
             top_k_terms: top_terms,
-            max_df_percent: max_df_percent
+            max_df_percent: max_df_percent,
+            line_context: line_context
           )
           terms = Query::Terms.extract(db, query_tokens, expanded, opts)
 

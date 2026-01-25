@@ -186,7 +186,7 @@ module Xerp::CLI
       },
       "source": {
         "type": "string",
-        "description": "Term source: scope (salience), line, block, vector (line+block), combined (default)"
+        "description": "Term source: scope, linesalience (proximity), line, block, vector, combined (default)"
       },
       "root": {
         "type": "string",
@@ -201,6 +201,11 @@ module Xerp::CLI
         "type": "integer",
         "default": 20,
         "description": "Number of blocks to analyze (scope mode)"
+      },
+      "context": {
+        "type": "integer",
+        "default": 2,
+        "description": "Lines of context for linesalience mode (±N lines)"
       },
       "max-df": {
         "type": "number",
@@ -308,6 +313,7 @@ module Xerp::CLI
     puts "  xerp query \"retry backoff\"        # Search for intent"
     puts "  xerp terms retry                  # Related terms (combined)"
     puts "  xerp terms retry --source scope   # Salience from matching scopes"
+    puts "  xerp terms retry --source linesalience  # Line proximity (no training)"
     puts "  xerp terms retry --source line    # Line vector model"
     puts "  xerp terms retry --source block   # Block vector model"
     puts "  xerp terms retry --source vector  # Both line+block models"

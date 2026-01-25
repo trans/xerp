@@ -9,11 +9,12 @@ require "./types"
 module Xerp::Query::Terms
   # Source for term extraction
   enum Source
-    Scope    # From matching scopes (query-time salience)
-    Line     # From line vector model only
-    Block    # From block vector model only
-    Vector   # From both vector models (line + block)
-    Combined # RRF of scope + vectors
+    Scope        # From matching scopes (query-time salience)
+    LineSalience # Query-time line proximity (no training needed)
+    Line         # From line vector model only
+    Block        # From block vector model only
+    Vector       # From both vector models (line + block)
+    Combined     # RRF of scope + vectors
   end
 
   # A term with its computed salience score.
@@ -47,6 +48,7 @@ module Xerp::Query::Terms
     getter max_df_percent : Float64   # Max df% to include (filters boilerplate)
     getter query_term_boost : Float64 # Boost for direct query matches
     getter intersection_boost : Float64 # Boost for terms in both scope and vector (combined)
+    getter line_context : Int32       # ±N lines around matches (LineSalience mode)
     getter file_filter : Regex?
     getter file_type_filter : String?
 
@@ -57,6 +59,7 @@ module Xerp::Query::Terms
       @max_df_percent : Float64 = 22.0,
       @query_term_boost : Float64 = 2.0,
       @intersection_boost : Float64 = 1.5,
+      @line_context : Int32 = 2,
       @file_filter : Regex? = nil,
       @file_type_filter : String? = nil
     )
@@ -71,6 +74,8 @@ module Xerp::Query::Terms
     case opts.source
     when Source::Scope
       extract_from_scope(db, query_tokens, expanded_tokens, opts)
+    when Source::LineSalience
+      extract_from_lines(db, query_tokens, expanded_tokens, opts)
     when Source::Line
       extract_from_model(db, query_tokens, opts, Vectors::Cooccurrence::MODEL_LINE)
     when Source::Block
@@ -395,6 +400,195 @@ module Xerp::Query::Terms
       end
 
       results << SalientTerm.new(term, token_id, salience, is_query_term, Source::Scope)
+    end
+
+    # Sort by salience descending
+    results.sort_by! { |t| -t.salience }
+
+    # Return top-K
+    if results.size > opts.top_k_terms
+      results = results[0, opts.top_k_terms]
+    end
+
+    results
+  end
+
+  # Extracts salient terms from lines near query matches.
+  # Uses distance-based weighting: terms on matching lines get full weight,
+  # nearby lines get decaying weight based on distance.
+  def self.extract_from_lines(db : DB::Database,
+                               query_tokens : Array(String),
+                               expanded_tokens : Hash(String, Array(Expansion::ExpandedToken)),
+                               opts : TermsOptions) : Array(SalientTerm)
+    total_files = Store::Statements.file_count(db).to_f64
+    return [] of SalientTerm if total_files == 0
+
+    # Build set of query token IDs for boost detection
+    query_token_ids = Set(Int64).new
+    expanded_tokens.each do |_, expansions|
+      expansions.each do |exp|
+        query_token_ids << exp.token_id.not_nil! if exp.token_id && exp.similarity >= 1.0
+      end
+    end
+
+    # 1. Find lines with query tokens and score them
+    line_scores = score_matching_lines(db, expanded_tokens, total_files)
+    return [] of SalientTerm if line_scores.empty?
+
+    # 2. Expand to nearby lines with distance weights
+    weighted_lines = expand_with_context(line_scores, opts.line_context)
+
+    # 3. Extract terms from those lines
+    salience_acc = accumulate_line_terms(db, weighted_lines)
+
+    # 4. Apply IDF and build results
+    build_salient_terms(db, salience_acc, total_files, query_token_ids, opts)
+  end
+
+  # Score lines by query token coverage.
+  # Returns Hash of {file_id, line_num} => score
+  private def self.score_matching_lines(
+    db : DB::Database,
+    expanded_tokens : Hash(String, Array(Expansion::ExpandedToken)),
+    total_files : Float64
+  ) : Hash({Int64, Int32}, Float64)
+    line_scores = Hash({Int64, Int32}, Float64).new(0.0)
+
+    expanded_tokens.each do |_, expansions|
+      expansions.each do |exp|
+        next unless exp.token_id
+
+        # Get IDF for this token
+        token_row = Store::Statements.select_token_by_id(db, exp.token_id.not_nil!)
+        next unless token_row
+        df = token_row.df.to_f64
+        idf = Math.log((total_files + 1.0) / (df + 1.0)) + 1.0
+
+        # Get postings for this token
+        postings = Store::Statements.select_postings_by_token(db, exp.token_id.not_nil!)
+
+        postings.each do |posting|
+          lines = Util.decode_delta_u32_list(posting.lines_blob)
+          lines.each do |line_num|
+            # Score contribution = token IDF × similarity
+            key = {posting.file_id, line_num.to_i32}
+            line_scores[key] += exp.similarity * idf
+          end
+        end
+      end
+    end
+
+    line_scores
+  end
+
+  # Expand scored lines to include context with distance decay.
+  # Weight formula: (context + 1 - distance) / (context + 1)
+  private def self.expand_with_context(
+    line_scores : Hash({Int64, Int32}, Float64),
+    context : Int32
+  ) : Hash({Int64, Int32}, Float64)
+    weighted_lines = Hash({Int64, Int32}, Float64).new(0.0)
+
+    line_scores.each do |(file_id, line_num), score|
+      (-context..context).each do |offset|
+        target_line = line_num + offset
+        next if target_line < 1
+
+        distance = offset.abs
+        weight = (context + 1 - distance).to_f64 / (context + 1)
+        contribution = score * weight
+
+        key = {file_id, target_line}
+        # Use max to avoid double-counting overlapping contexts
+        weighted_lines[key] = Math.max(weighted_lines[key], contribution)
+      end
+    end
+
+    weighted_lines
+  end
+
+  # Extract terms from weighted lines and accumulate salience.
+  # Returns Hash of token_id => {salience_sum, term_text}
+  private def self.accumulate_line_terms(
+    db : DB::Database,
+    weighted_lines : Hash({Int64, Int32}, Float64)
+  ) : Hash(Int64, {Float64, String})
+    salience_acc = Hash(Int64, {Float64, String}).new
+
+    # Group weighted lines by file for efficient querying
+    files = Hash(Int64, Hash(Int32, Float64)).new
+    weighted_lines.each do |(file_id, line_num), weight|
+      files[file_id] ||= Hash(Int32, Float64).new
+      files[file_id][line_num] = weight
+    end
+
+    files.each do |file_id, line_weights|
+      postings = Store::Statements.select_postings_by_file(db, file_id)
+      postings.each do |posting|
+        lines = Util.decode_delta_u32_list(posting.lines_blob)
+
+        contribution = 0.0
+        lines.each do |ln|
+          if weight = line_weights[ln.to_i32]?
+            contribution += weight
+          end
+        end
+
+        next if contribution == 0.0
+
+        if existing = salience_acc[posting.token_id]?
+          salience_acc[posting.token_id] = {existing[0] + contribution, existing[1]}
+        else
+          # Look up token text
+          token_row = Store::Statements.select_token_by_id(db, posting.token_id)
+          next unless token_row
+          # Skip non-meaningful token kinds
+          next unless token_row.kind.in?("ident", "word", "compound")
+          salience_acc[posting.token_id] = {contribution, token_row.token}
+        end
+      end
+    end
+
+    salience_acc
+  end
+
+  # Apply IDF and build final salient terms list.
+  private def self.build_salient_terms(
+    db : DB::Database,
+    salience_acc : Hash(Int64, {Float64, String}),
+    total_files : Float64,
+    query_token_ids : Set(Int64),
+    opts : TermsOptions
+  ) : Array(SalientTerm)
+    return [] of SalientTerm if salience_acc.empty?
+
+    results = [] of SalientTerm
+
+    salience_acc.each do |token_id, (raw_salience, term)|
+      token_row = Store::Statements.select_token_by_id(db, token_id)
+      next unless token_row
+
+      df = token_row.df.to_f64
+      # IDF: ln((N + 1) / (df + 1)) + 1
+      idf = Math.log((total_files + 1.0) / (df + 1.0)) + 1.0
+
+      is_query_term = query_token_ids.includes?(token_id)
+
+      # Filter by max_df_percent unless it's a query term
+      unless is_query_term
+        df_percent = (df / total_files) * 100.0
+        next if df_percent > opts.max_df_percent
+      end
+
+      # Compute final salience
+      salience = raw_salience * idf
+
+      # Boost query terms
+      if is_query_term
+        salience *= opts.query_term_boost
+      end
+
+      results << SalientTerm.new(term, token_id, salience, is_query_term, Source::LineSalience)
     end
 
     # Sort by salience descending
