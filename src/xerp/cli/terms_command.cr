@@ -13,25 +13,34 @@ module Xerp::CLI
       root = result["root"]?.try(&.as_s) || Dir.current
       root = File.expand_path(root)
       query = result["query"]?.try(&.as_s) || ""
-      source_arg = result["source"]?.try(&.as_s) || "combined"
+      salience_arg = result["salience"]?.try(&.as_s) || "all"
+      vector_arg = result["vector"]?.try(&.as_s) || "all"
       top_blocks = result["top-blocks"]?.try(&.as_i) || 20
       top_terms = result["top"]?.try(&.as_i) || 30
       max_df_percent = result["max-df"]?.try(&.as_f) || 22.0
       line_context = result["context"]?.try(&.as_i) || 2
       json_output = result["json"]?.try(&.as_bool) || false
 
-      # Parse source
-      source = case source_arg.downcase
-               when "scope"                      then Query::Terms::Source::Scope
-               when "linesalience", "proximity"  then Query::Terms::Source::LineSalience
-               when "line"                       then Query::Terms::Source::Line
-               when "block"                      then Query::Terms::Source::Block
-               when "vector"                     then Query::Terms::Source::Vector
-               when "combined"                   then Query::Terms::Source::Combined
-               else
-                 STDERR.puts "Error: Invalid source '#{source_arg}'. Use: scope, linesalience, line, block, vector, or combined"
-                 return 1
-               end
+      # Parse salience granularity
+      salience = parse_granularity(salience_arg)
+      unless salience
+        STDERR.puts "Error: Invalid salience '#{salience_arg}'. Use: none, line, block, or all"
+        return 1
+      end
+
+      # Parse vector granularity
+      vector = parse_granularity(vector_arg)
+      unless vector
+        STDERR.puts "Error: Invalid vector '#{vector_arg}'. Use: none, line, block, or all"
+        return 1
+      end
+
+      source = Query::Terms::SourceConfig.new(salience: salience, vector: vector)
+
+      unless source.any?
+        STDERR.puts "Error: At least one source must be enabled (--salience or --vector)"
+        return 1
+      end
 
       if query.empty?
         STDERR.puts "Error: Query is required"
@@ -61,7 +70,7 @@ module Xerp::CLI
             return 1
           end
 
-          # Expand tokens (needed for scope mode)
+          # Expand tokens (needed for salience modes)
           expanded = Query::Expansion.expand(db, query_tokens)
 
           # Extract terms
@@ -75,7 +84,7 @@ module Xerp::CLI
           terms = Query::Terms.extract(db, query_tokens, expanded, opts)
 
           elapsed = (Time.monotonic - start_time).total_milliseconds.to_i64
-          terms_result = Query::Terms::TermsResult.new(query, terms, elapsed, source)
+          terms_result = Query::Terms::TermsResult.new(query, terms, elapsed, source.description)
         end
 
         if tr = terms_result
@@ -90,6 +99,16 @@ module Xerp::CLI
       rescue ex
         STDERR.puts "Error: #{ex.message}"
         1
+      end
+    end
+
+    private def self.parse_granularity(arg : String) : Query::Terms::Granularity?
+      case arg.downcase
+      when "none"  then Query::Terms::Granularity::None
+      when "line"  then Query::Terms::Granularity::Line
+      when "block" then Query::Terms::Granularity::Block
+      when "all"   then Query::Terms::Granularity::All
+      else              nil
       end
     end
   end

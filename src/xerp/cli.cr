@@ -184,9 +184,15 @@ module Xerp::CLI
         "type": "string",
         "description": "Search query"
       },
-      "source": {
+      "salience": {
         "type": "string",
-        "description": "Term source: scope, linesalience (proximity), line, block, vector, combined (default)"
+        "default": "all",
+        "description": "Query-time salience: none, line, block, or all (default)"
+      },
+      "vector": {
+        "type": "string",
+        "default": "all",
+        "description": "Trained vectors: none, line, block, or all (default)"
       },
       "root": {
         "type": "string",
@@ -200,12 +206,12 @@ module Xerp::CLI
       "top-blocks": {
         "type": "integer",
         "default": 20,
-        "description": "Number of blocks to analyze (scope mode)"
+        "description": "Number of blocks to analyze (salience block mode)"
       },
       "context": {
         "type": "integer",
         "default": 2,
-        "description": "Lines of context for linesalience mode (±N lines)"
+        "description": "Lines of context for salience line mode (±N lines)"
       },
       "max-df": {
         "type": "number",
@@ -300,7 +306,7 @@ module Xerp::CLI
     puts "Commands:"
     puts "  index    Index workspace files"
     puts "  query    Search indexed content (alias: q)"
-    puts "  terms    Find related terms (scope, vector, or combined)"
+    puts "  terms    Find related terms (salience, vector, or both)"
     puts "  outline  Show structural outline of indexed files"
     puts "  mark     Record feedback on results"
     puts "  train    Train semantic token vectors"
@@ -311,12 +317,12 @@ module Xerp::CLI
     puts "  xerp index                        # Index current directory"
     puts "  xerp index --train                # Index and train vectors"
     puts "  xerp query \"retry backoff\"        # Search for intent"
-    puts "  xerp terms retry                  # Related terms (combined)"
-    puts "  xerp terms retry --source scope   # Salience from matching scopes"
-    puts "  xerp terms retry --source linesalience  # Line proximity (no training)"
-    puts "  xerp terms retry --source line    # Line vector model"
-    puts "  xerp terms retry --source block   # Block vector model"
-    puts "  xerp terms retry --source vector  # Both line+block models"
+    puts "  xerp terms retry                  # All sources (default)"
+    puts "  xerp terms retry --salience line  # Line salience only"
+    puts "  xerp terms retry --salience block # Block salience only"
+    puts "  xerp terms retry --vector line    # Line vectors only"
+    puts "  xerp terms retry --vector none    # Salience only (no vectors)"
+    puts "  xerp terms retry --salience none  # Vectors only (no salience)"
     puts "  xerp outline                      # Show code structure"
     puts "  xerp outline --file 'src/*.cr'    # Filter by file pattern"
     puts "  xerp mark abc123 --useful         # Mark result as useful"
