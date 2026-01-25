@@ -41,7 +41,7 @@ module Xerp::Query::ScopeScorer
   private struct ScopeAccumulator
     property file_id : Int64 = 0_i64
     property token_count : Int32 = 0          # block size (eligible tokens)
-    property tf_by_token : Hash(String, Int32) = {} of String => Int32  # query_token -> tf
+    property tf_by_token : Hash(String, Float64) = {} of String => Float64  # query_token -> weighted tf
     property token_hits : Hash(String, TokenHit) = {} of String => TokenHit
     property child_hit_counts : Hash(Int64, Int32) = {} of Int64 => Int32  # direct child -> hit count
     property children : Array(Int64) = [] of Int64  # direct children block_ids
@@ -63,7 +63,7 @@ module Xerp::Query::ScopeScorer
     # Step 2: Build candidate scope set (hit blocks + ancestors)
     # Also precompute IDF per query token
     idf_by_token = compute_idf_map(db, expanded_tokens, total_files)
-    candidate_scopes = build_candidate_scopes(db, hit_blocks, idf_by_token)
+    candidate_scopes = build_candidate_scopes(db, hit_blocks, idf_by_token, opts.raw_vectors)
 
     # Step 3-7: Compute salience and clustering for each scope
     results = candidate_scopes.map do |block_id, acc|
@@ -98,12 +98,12 @@ module Xerp::Query::ScopeScorer
   end
 
   # Collects all hits, mapping each to its leaf block.
-  # Returns: block_id -> {file_id, query_token -> {expanded_token, lines}}
+  # Returns: block_id -> {file_id, query_token -> {expanded_token, similarity, lines}}
   private def self.collect_hits(db : DB::Database,
                                  expanded_tokens : Hash(String, Array(Expansion::ExpandedToken)),
-                                 opts : QueryOptions) : Hash(Int64, {Int64, Hash(String, Array({String, Array(Int32)}))})
-    # Result: block_id -> {file_id, query_token -> [(expanded_token, lines)]}
-    hit_blocks = Hash(Int64, {Int64, Hash(String, Array({String, Array(Int32)}))}).new
+                                 opts : QueryOptions) : Hash(Int64, {Int64, Hash(String, Array({String, Float64, Array(Int32)}))})
+    # Result: block_id -> {file_id, query_token -> [(expanded_token, similarity, lines)]}
+    hit_blocks = Hash(Int64, {Int64, Hash(String, Array({String, Float64, Array(Int32)}))}).new
 
     # Cache for block line maps
     block_line_maps = Hash(Int64, Array(Int64)).new
@@ -150,13 +150,13 @@ module Xerp::Query::ScopeScorer
             hits_by_block[block_id] << line
           end
 
-          # Record hits
+          # Record hits with similarity
           hits_by_block.each do |block_id, lines|
             unless hit_blocks.has_key?(block_id)
-              hit_blocks[block_id] = {file_id, Hash(String, Array({String, Array(Int32)})).new { |h, k| h[k] = [] of {String, Array(Int32)} }}
+              hit_blocks[block_id] = {file_id, Hash(String, Array({String, Float64, Array(Int32)})).new { |h, k| h[k] = [] of {String, Float64, Array(Int32)} }}
             end
             _, token_map = hit_blocks[block_id]
-            token_map[query_token] << {exp.expanded, lines}
+            token_map[query_token] << {exp.expanded, exp.similarity, lines}
           end
         end
       end
@@ -194,9 +194,11 @@ module Xerp::Query::ScopeScorer
 
   # Builds candidate scope set from hit blocks + their ancestors.
   # Also populates token_count, tf_by_token, and child relationships.
+  # When raw_vectors=true, all similarities are treated as 1.0 (pure TF-IDF).
   private def self.build_candidate_scopes(db : DB::Database,
-                                           hit_blocks : Hash(Int64, {Int64, Hash(String, Array({String, Array(Int32)}))}),
-                                           idf_by_token : Hash(String, Float64)) : Hash(Int64, ScopeAccumulator)
+                                           hit_blocks : Hash(Int64, {Int64, Hash(String, Array({String, Float64, Array(Int32)}))}),
+                                           idf_by_token : Hash(String, Float64),
+                                           raw_vectors : Bool = false) : Hash(Int64, ScopeAccumulator)
     candidates = Hash(Int64, ScopeAccumulator).new
 
     # Cache for block info
@@ -228,15 +230,20 @@ module Xerp::Query::ScopeScorer
       # Add TF and hits to this block
       acc = candidates[block_id]
       token_map.each do |query_token, expansions|
-        total_tf = expansions.sum { |(_, lines)| lines.size }
-        acc.tf_by_token[query_token] = (acc.tf_by_token[query_token]? || 0) + total_tf
+        # Weight TF by similarity (or use raw count if raw_vectors mode)
+        total_tf = expansions.sum do |(_, sim, lines)|
+          weight = raw_vectors ? 1.0 : sim
+          lines.size.to_f64 * weight
+        end
+        acc.tf_by_token[query_token] = (acc.tf_by_token[query_token]? || 0.0) + total_tf
 
         # Record token hits (use first expansion for display)
-        expansions.each do |(expanded_token, lines)|
+        expansions.each do |(expanded_token, sim, lines)|
           idf = idf_by_token[query_token]? || 1.0
           tf = lines.size
-          # Contribution for hit display (simplified)
-          contribution = Math.log(1.0 + tf) * idf
+          weight = raw_vectors ? 1.0 : sim
+          # Contribution for hit display
+          contribution = Math.log(1.0 + tf * weight) * idf
 
           if existing = acc.token_hits[expanded_token]?
             # Merge lines
@@ -244,7 +251,7 @@ module Xerp::Query::ScopeScorer
             acc.token_hits[expanded_token] = TokenHit.new(
               token: expanded_token,
               original_query_token: query_token,
-              similarity: existing.similarity,
+              similarity: sim,
               lines: merged_lines,
               contribution: existing.contribution + contribution
             )
@@ -252,7 +259,7 @@ module Xerp::Query::ScopeScorer
             acc.token_hits[expanded_token] = TokenHit.new(
               token: expanded_token,
               original_query_token: query_token,
-              similarity: 1.0,  # exact match
+              similarity: sim,
               lines: lines,
               contribution: contribution
             )
@@ -283,24 +290,30 @@ module Xerp::Query::ScopeScorer
 
         # Propagate TF and token_hits up to ancestors
         token_map.each do |query_token, expansions|
-          total_tf = expansions.sum { |(_, lines)| lines.size }
-          parent_acc.tf_by_token[query_token] = (parent_acc.tf_by_token[query_token]? || 0) + total_tf
+          # Weight TF by similarity
+          total_tf = expansions.sum do |(_, sim, lines)|
+            weight = raw_vectors ? 1.0 : sim
+            lines.size.to_f64 * weight
+          end
+          parent_acc.tf_by_token[query_token] = (parent_acc.tf_by_token[query_token]? || 0.0) + total_tf
 
-          # Track which direct child contributed hits
-          parent_acc.child_hit_counts[child_id] = (parent_acc.child_hit_counts[child_id]? || 0) + total_tf
+          # Track which direct child contributed hits (raw count for clustering)
+          raw_count = expansions.sum { |(_, _, lines)| lines.size }
+          parent_acc.child_hit_counts[child_id] = (parent_acc.child_hit_counts[child_id]? || 0) + raw_count
 
           # Propagate token_hits to ancestor for display
-          expansions.each do |(expanded_token, lines)|
+          expansions.each do |(expanded_token, sim, lines)|
             idf = idf_by_token[query_token]? || 1.0
             tf = lines.size
-            contribution = Math.log(1.0 + tf) * idf
+            weight = raw_vectors ? 1.0 : sim
+            contribution = Math.log(1.0 + tf * weight) * idf
 
             if existing = parent_acc.token_hits[expanded_token]?
               merged_lines = (existing.lines + lines).uniq.sort
               parent_acc.token_hits[expanded_token] = TokenHit.new(
                 token: expanded_token,
                 original_query_token: query_token,
-                similarity: existing.similarity,
+                similarity: sim,
                 lines: merged_lines,
                 contribution: existing.contribution + contribution
               )
@@ -308,7 +321,7 @@ module Xerp::Query::ScopeScorer
               parent_acc.token_hits[expanded_token] = TokenHit.new(
                 token: expanded_token,
                 original_query_token: query_token,
-                similarity: 1.0,
+                similarity: sim,
                 lines: lines,
                 contribution: contribution
               )
@@ -368,12 +381,13 @@ module Xerp::Query::ScopeScorer
 
   # Computes salience score for a scope.
   # salience(S) = Σ[tfw(S, q) * idf(q)] / norm(S)
+  # TF is already weighted by similarity if not in raw_vectors mode.
   private def self.compute_salience(acc : ScopeAccumulator, idf_by_token : Hash(String, Float64)) : Float64
     # TF saturation: tfw = ln(1 + tf)
     # Size normalization: norm = (1 + size)^alpha
     numerator = 0.0
     acc.tf_by_token.each do |query_token, tf|
-      tfw = Math.log(1.0 + tf)
+      tfw = Math.log(1.0 + tf)  # tf is already similarity-weighted
       idf = idf_by_token[query_token]? || 1.0
       numerator += tfw * idf
     end

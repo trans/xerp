@@ -28,6 +28,7 @@ module Xerp::CLI
       jsonl_output = result["jsonl"]?.try(&.as_bool) || false
       grep_output = result["grep"]?.try(&.as_bool) || false
       vector_arg = result["vector"]?.try(&.as_s) || "all"
+      raw_vectors = result["raw"]?.try(&.as_bool) || false
 
       # Parse vector mode
       vector_mode = parse_vector_mode(vector_arg)
@@ -66,7 +67,8 @@ module Xerp::CLI
           file_type_filter: file_type_filter,
           max_snippet_lines: max_block_lines,
           context_lines: context_lines,
-          vector_mode: vector_mode
+          vector_mode: vector_mode,
+          raw_vectors: raw_vectors
         )
 
         response = engine.run(query_text, opts)

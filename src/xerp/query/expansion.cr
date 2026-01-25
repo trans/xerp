@@ -42,12 +42,14 @@ module Xerp::Query::Expansion
   # Expands query tokens using semantic neighbors if available.
   # Returns identity expansion plus nearest neighbors from trained vectors.
   # Uses union+rerank blending when both models are trained.
+  # When raw_vectors=true, returns pure similarity scores without IDF weighting.
   def self.expand(db : DB::Database, query_tokens : Array(String),
                   top_k : Int32 = DEFAULT_TOP_K_PER_TOKEN,
                   min_similarity : Float64 = DEFAULT_MIN_SIMILARITY,
                   weights : BlendWeights = BlendWeights.new,
                   max_df_percent : Float64 = DEFAULT_MAX_DF_PERCENT,
-                  vector_mode : VectorMode = VectorMode::All) : Hash(String, Array(ExpandedToken))
+                  vector_mode : VectorMode = VectorMode::All,
+                  raw_vectors : Bool = false) : Hash(String, Array(ExpandedToken))
     result = Hash(String, Array(ExpandedToken)).new
 
     # Check which models are available and requested

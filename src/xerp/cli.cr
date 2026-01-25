@@ -100,6 +100,10 @@ module Xerp::CLI
         "type": "string",
         "default": "all",
         "description": "Vector expansion: none, line, block, or all (default)"
+      },
+      "raw": {
+        "type": "boolean",
+        "description": "Raw TF-IDF scoring (ignore vector similarity weights)"
       }
     },
     "required": ["query"]
@@ -324,6 +328,7 @@ module Xerp::CLI
     puts "  xerp query \"retry backoff\"        # Search for intent"
     puts "  xerp query retry --vector none    # No expansion (exact match)"
     puts "  xerp query retry --vector line    # Line model expansion only"
+    puts "  xerp query retry --raw            # Pure TF-IDF (no similarity weighting)"
     puts "  xerp terms retry                  # All sources (default)"
     puts "  xerp terms retry --salience line  # Line salience only"
     puts "  xerp terms retry --salience block # Block salience only"

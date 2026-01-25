@@ -17,6 +17,7 @@ module Xerp::Query
     getter max_snippet_lines : Int32
     getter context_lines : Int32
     getter vector_mode : VectorMode
+    getter raw_vectors : Bool  # Skip IDF weighting, show pure vector similarity
 
     def initialize(
       @top_k : Int32 = 20,
@@ -26,7 +27,8 @@ module Xerp::Query
       @file_type_filter : String? = nil,
       @max_snippet_lines : Int32 = 24,
       @context_lines : Int32 = 2,
-      @vector_mode : VectorMode = VectorMode::All
+      @vector_mode : VectorMode = VectorMode::All,
+      @raw_vectors : Bool = false
     )
     end
   end
