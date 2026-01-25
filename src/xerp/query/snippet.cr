@@ -57,8 +57,12 @@ module Xerp::Query::Snippet
     extract_with_error(workspace_root, rel_path, block, hit_lines, max_lines, context_lines).content
   end
 
+  # Line number marker prefix (used internally to track line numbers across gaps)
+  LINE_MARKER_PREFIX = "\x00LN:"
+
   # Formats raw snippet content with line number prefixes for display.
   # Handles "..." ellipsis markers specially (no line number).
+  # Handles embedded line markers (LN:123) to track actual line numbers across gaps.
   def self.format_with_line_numbers(content : String, line_start : Int32) : String
     return "" if content.empty?
 
@@ -71,7 +75,9 @@ module Xerp::Query::Snippet
         result << "    │ "
         result << ELLIPSIS
         result << "\n"
-        # Don't increment current_line - ellipsis represents a gap
+      elsif line.starts_with?(LINE_MARKER_PREFIX)
+        # Line number marker - update current_line
+        current_line = line[LINE_MARKER_PREFIX.size..].to_i
       else
         result << current_line.to_s.rjust(4)
         result << "│ "
@@ -220,6 +226,7 @@ module Xerp::Query::Snippet
   end
 
   # Builds output string with ellipsis between non-contiguous regions.
+  # Embeds line number markers before each region so formatter can track actual line numbers.
   private def self.build_output_with_ellipsis(file_lines : Array(String), regions : Array(Region)) : String
     return "" if regions.empty?
 
@@ -232,6 +239,11 @@ module Xerp::Query::Snippet
         result << ELLIPSIS
         result << "\n"
       end
+
+      # Emit line number marker (1-indexed for display)
+      result << LINE_MARKER_PREFIX
+      result << (region.start_line + 1).to_s
+      result << "\n"
 
       # Add lines from this region
       (region.start_line..region.end_line).each do |line_idx|
