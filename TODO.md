@@ -29,6 +29,14 @@
 
 ## Model Architecture
 
+TF-IDF usage by component:
+| Component | TF-IDF? | Notes |
+|-----------|---------|-------|
+| Co-occurrence vectors | No | Raw counts, keeps optionality |
+| Token expansion | Light | IDF reranking (w=0.1) |
+| Block centroids | Yes | IDF-weighted at training time |
+| Salience scoring | Yes | Full TF-IDF |
+
 Current coverage (line/block × salience/vector/centroid):
 
 |           | Salience | Vector | Centroid |
@@ -39,9 +47,15 @@ Current coverage (line/block × salience/vector/centroid):
 - [x] **Line salience**: query-time term extraction from matching lines (more granular than block)
 - [x] **Block centroid**: `--vector centroid` computes query centroid, finds tokens with similar vectors
 - [ ] **Hierarchical block centroids**: current centroid is query-time average of query tokens
-  - Leaf blocks: centroid from header tokens
-  - Parent blocks: average centroid of children's centroids
-  - Store pre-computed centroids during training
+  - Leaf blocks: centroid from header + body tokens (IDF-weighted)
+  - Parent blocks: average of children's centroids (maybe blend with header)
+  - Pre-compute and store during training
+  - Use IDF weighting when computing centroids:
+    ```
+    centroid = Σ (token_vector * idf(token)) / Σ idf(token)
+    ```
+  - Keep raw co-occurrence vectors pure (no TF-IDF baked in)
+  - Enables semantic block search without exact token matches
 
 ## Block Structure Issues
 
