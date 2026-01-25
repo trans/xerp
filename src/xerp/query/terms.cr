@@ -195,7 +195,7 @@ module Xerp::Query::Terms
   end
 
   # Extracts terms by computing query centroid and finding similar tokens.
-  # Uses both line and block models to build a composite centroid.
+  # Optimized: only queries contexts that appear in query tokens.
   def self.extract_from_centroid(db : DB::Database,
                                   query_tokens : Array(String),
                                   opts : TermsOptions,
@@ -219,16 +219,16 @@ module Xerp::Query::Terms
     end
     return [] of SalientTerm if query_token_ids.empty?
 
-    # Load all co-occurrence data for query tokens in one query
-    vectors, inverted_index, norms = load_centroid_data(db, query_token_ids)
-    return [] of SalientTerm if vectors.empty?
+    # Step 1: Load vectors for query tokens only (small, fast)
+    query_vectors = load_query_vectors(db, query_token_ids)
+    return [] of SalientTerm if query_vectors.empty?
 
-    # Build query centroid: weighted average of query token co-occurrence vectors
+    # Step 2: Build query centroid
     centroid = Hash(Int64, Float64).new(0.0)
     tokens_with_vectors = 0
 
     query_token_ids.each do |token_id|
-      token_vec = vectors[token_id]?
+      token_vec = query_vectors[token_id]?
       next unless token_vec && !token_vec.empty?
       tokens_with_vectors += 1
       token_vec.each do |context_id, count|
@@ -241,28 +241,25 @@ module Xerp::Query::Terms
     # Normalize centroid (average)
     centroid.transform_values! { |v| v / tokens_with_vectors }
 
-    # Compute centroid norm for cosine similarity
+    # Compute centroid norm
     centroid_norm = Math.sqrt(centroid.values.sum { |v| v * v })
     return [] of SalientTerm if centroid_norm == 0.0
 
-    # Find tokens similar to centroid using inverted index
-    candidate_scores = Hash(Int64, Float64).new(0.0)
+    # Step 3: Find candidate tokens via inverted lookup (only contexts in centroid)
+    candidate_scores = find_centroid_candidates(db, centroid)
+    return [] of SalientTerm if candidate_scores.empty?
 
-    centroid.each do |context_id, centroid_weight|
-      if candidates = inverted_index[context_id]?
-        candidates.each do |(token_id, count)|
-          candidate_scores[token_id] += centroid_weight * count.to_f64
-        end
-      end
-    end
+    # Remove query tokens from candidates (we'll add them back with boost)
+    query_token_ids.each { |id| candidate_scores.delete(id) }
 
-    # Convert to cosine similarities
+    # Step 4: Batch-load norms for candidates
+    candidate_ids = candidate_scores.keys
+    norms = load_token_norms(db, candidate_ids)
+
+    # Step 5: Convert to cosine similarities
     results = [] of SalientTerm
 
     candidate_scores.each do |token_id, dot_product|
-      # Skip query tokens from similarity computation (we'll add them back with boost)
-      next if query_token_ids.includes?(token_id)
-
       # Get token info
       token_row = Store::Statements.select_token_by_id(db, token_id)
       next unless token_row
@@ -272,7 +269,7 @@ module Xerp::Query::Terms
       df_percent = (token_row.df.to_f64 / total_files) * 100.0
       next if df_percent > opts.max_df_percent
 
-      # Get token norm from precomputed norms
+      # Get token norm
       token_norm = norms[token_id]? || 0.0
       next if token_norm == 0.0
 
@@ -290,8 +287,6 @@ module Xerp::Query::Terms
     query_token_ids.each do |token_id|
       token_row = Store::Statements.select_token_by_id(db, token_id)
       next unless token_row
-
-      # Query tokens get a boosted score based on their centroid contribution
       score = 1000.0 * opts.query_term_boost
       results << SalientTerm.new(token_row.token, token_id, score, true, source_label)
     end
@@ -300,53 +295,83 @@ module Xerp::Query::Terms
     results.first(opts.top_k_terms)
   end
 
-  # Loads all co-occurrence data needed for centroid computation.
-  # Returns: {vectors, inverted_index, norms}
-  private def self.load_centroid_data(db : DB::Database, query_token_ids : Set(Int64)) : {Hash(Int64, Hash(Int64, Int64)), Hash(Int64, Array({Int64, Int64})), Hash(Int64, Float64)}
-    # vectors[token_id][context_id] = count (only for query tokens)
+  # Loads co-occurrence vectors for query tokens only.
+  private def self.load_query_vectors(db : DB::Database, query_token_ids : Set(Int64)) : Hash(Int64, Hash(Int64, Int64))
     vectors = Hash(Int64, Hash(Int64, Int64)).new
+    query_token_ids.each { |id| vectors[id] = Hash(Int64, Int64).new }
 
-    # inverted_index[context_id] = [(token_id, count), ...] (all tokens)
-    inverted_index = Hash(Int64, Array({Int64, Int64})).new
+    # Build IN clause
+    ids_str = query_token_ids.join(",")
+    return vectors if ids_str.empty?
 
-    # norms[token_id] = L2 norm
-    norms = Hash(Int64, Float64).new
-
-    # First, load vectors for query tokens
-    query_token_ids.each do |token_id|
-      vectors[token_id] = Hash(Int64, Int64).new
+    db.query("SELECT token_id, context_id, count FROM token_cooccurrence WHERE token_id IN (#{ids_str})") do |rs|
+      rs.each do
+        token_id = rs.read(Int64)
+        context_id = rs.read(Int64)
+        count = rs.read(Int64)
+        vectors[token_id][context_id] = count
+      end
     end
 
-    # Load all co-occurrence data in one pass
-    # This builds the inverted index and norms for all tokens
-    norm_acc = Hash(Int64, Float64).new(0.0)
+    vectors
+  end
 
-    db.query("SELECT token_id, context_id, count FROM token_cooccurrence") do |rs|
+  # Finds candidate tokens that share contexts with the centroid.
+  # Returns dot product accumulator for each candidate.
+  private def self.find_centroid_candidates(db : DB::Database, centroid : Hash(Int64, Float64)) : Hash(Int64, Float64)
+    candidate_scores = Hash(Int64, Float64).new(0.0)
+
+    # Build IN clause for context IDs
+    context_ids_str = centroid.keys.join(",")
+    return candidate_scores if context_ids_str.empty?
+
+    # Query all tokens that have any of these contexts
+    db.query("SELECT token_id, context_id, count FROM token_cooccurrence WHERE context_id IN (#{context_ids_str})") do |rs|
       rs.each do
         token_id = rs.read(Int64)
         context_id = rs.read(Int64)
         count = rs.read(Int64)
 
-        # Build vector for query tokens
-        if vectors.has_key?(token_id)
-          vectors[token_id][context_id] = count
-        end
-
-        # Build inverted index for all tokens
-        inverted_index[context_id] ||= [] of {Int64, Int64}
-        inverted_index[context_id] << {token_id, count}
-
-        # Accumulate norm
-        norm_acc[token_id] += count.to_f64 * count.to_f64
+        # Accumulate dot product contribution
+        centroid_weight = centroid[context_id]? || 0.0
+        candidate_scores[token_id] += centroid_weight * count.to_f64
       end
     end
 
-    # Finalize norms
-    norm_acc.each do |token_id, sum_sq|
-      norms[token_id] = Math.sqrt(sum_sq)
+    candidate_scores
+  end
+
+  # Batch-loads norms for candidate tokens.
+  # Uses pre-computed norms from token_vector_norms if available, otherwise computes.
+  private def self.load_token_norms(db : DB::Database, token_ids : Array(Int64)) : Hash(Int64, Float64)
+    norms = Hash(Int64, Float64).new
+    return norms if token_ids.empty?
+
+    ids_str = token_ids.join(",")
+
+    # Try pre-computed norms first (sum across models)
+    db.query("SELECT token_id, SUM(norm * norm) FROM token_vector_norms WHERE token_id IN (#{ids_str}) GROUP BY token_id") do |rs|
+      rs.each do
+        token_id = rs.read(Int64)
+        sum_sq = rs.read(Float64)
+        norms[token_id] = Math.sqrt(sum_sq)
+      end
     end
 
-    {vectors, inverted_index, norms}
+    # For any missing, compute from co-occurrence
+    missing = token_ids.reject { |id| norms.has_key?(id) }
+    unless missing.empty?
+      missing_str = missing.join(",")
+      db.query("SELECT token_id, SUM(count * count) FROM token_cooccurrence WHERE token_id IN (#{missing_str}) GROUP BY token_id") do |rs|
+        rs.each do
+          token_id = rs.read(Int64)
+          sum_sq = rs.read(Int64).to_f64
+          norms[token_id] = Math.sqrt(sum_sq)
+        end
+      end
+    end
+
+    norms
   end
 
   # Gets neighbors from a single model (bypasses blend_neighbors).

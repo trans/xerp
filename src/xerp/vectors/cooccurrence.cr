@@ -332,8 +332,7 @@ module Xerp::Vectors
       # Batch insert all neighbors
       neighbors_computed = store_all_neighbors(db, model, all_neighbors)
 
-      # Clean up intermediate cache (norms are recomputed from cooccurrence anyway)
-      db.exec("DELETE FROM token_vector_norms WHERE model_id = ?", model_id(model))
+      # Keep norms for centroid queries (don't delete)
 
       neighbors_computed
     end
