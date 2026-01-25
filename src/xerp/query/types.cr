@@ -1,4 +1,12 @@
 module Xerp::Query
+  # Controls which vector models are used for token expansion.
+  enum VectorMode
+    None   # No expansion, exact token matches only
+    Line   # Use line model neighbors
+    Block  # Use block model neighbors
+    All    # Use both line and block models
+  end
+
   # Options for running a query.
   struct QueryOptions
     getter top_k : Int32
@@ -8,6 +16,7 @@ module Xerp::Query
     getter file_type_filter : String?
     getter max_snippet_lines : Int32
     getter context_lines : Int32
+    getter vector_mode : VectorMode
 
     def initialize(
       @top_k : Int32 = 20,
@@ -16,7 +25,8 @@ module Xerp::Query
       @file_filter : Regex? = nil,
       @file_type_filter : String? = nil,
       @max_snippet_lines : Int32 = 24,
-      @context_lines : Int32 = 2
+      @context_lines : Int32 = 2,
+      @vector_mode : VectorMode = VectorMode::All
     )
     end
   end

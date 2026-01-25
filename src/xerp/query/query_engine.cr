@@ -63,8 +63,8 @@ module Xerp::Query
           )
         end
 
-        # Expand tokens
-        expanded = Expansion.expand(db, query_tokens)
+        # Expand tokens using configured vector mode
+        expanded = Expansion.expand(db, query_tokens, vector_mode: opts.vector_mode)
 
         # Score scopes using DESIGN02-00 algorithm
         scope_scores = ScopeScorer.score_scopes(db, expanded, opts)

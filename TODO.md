@@ -2,7 +2,8 @@
 
 ## Query Expansion Control
 
-- [ ] Add `--salience`/`--vector` flags to `query` command (like `terms` has)
+- [x] Add `--vector` flag to `query` command (none, line, block, all)
+- [ ] Add `--salience` flag to `query` command (if needed for result ranking)
 
 ## Outline Enhancements
 
@@ -36,7 +37,11 @@ Current coverage (line/block × salience/vector/centroid):
 | **Block** | ✅       | ✅     | ✅       |
 
 - [x] **Line salience**: query-time term extraction from matching lines (more granular than block)
-- [x] **Block centroid**: `--vector centroid` computes query centroid and finds semantically similar terms
+- [x] **Block centroid**: `--vector centroid` computes query centroid, finds tokens with similar vectors
+- [ ] **Hierarchical block centroids**: current centroid is query-time average of query tokens
+  - Leaf blocks: centroid from header tokens
+  - Parent blocks: average centroid of children's centroids
+  - Store pre-computed centroids during training
 
 ## Block Structure Issues
 

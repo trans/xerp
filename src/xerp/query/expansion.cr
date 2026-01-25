@@ -46,11 +46,16 @@ module Xerp::Query::Expansion
                   top_k : Int32 = DEFAULT_TOP_K_PER_TOKEN,
                   min_similarity : Float64 = DEFAULT_MIN_SIMILARITY,
                   weights : BlendWeights = BlendWeights.new,
-                  max_df_percent : Float64 = DEFAULT_MAX_DF_PERCENT) : Hash(String, Array(ExpandedToken))
+                  max_df_percent : Float64 = DEFAULT_MAX_DF_PERCENT,
+                  vector_mode : VectorMode = VectorMode::All) : Hash(String, Array(ExpandedToken))
     result = Hash(String, Array(ExpandedToken)).new
 
-    # Check if line model has been trained
-    has_line = model_trained?(db, Vectors::Cooccurrence::MODEL_LINE)
+    # Check which models are available and requested
+    use_line = vector_mode.line? || vector_mode.all?
+    use_block = vector_mode.block? || vector_mode.all?
+    has_line = use_line && model_trained?(db, Vectors::Cooccurrence::MODEL_LINE)
+    has_block = use_block && model_trained?(db, Vectors::Cooccurrence::MODEL_SCOPE)
+    has_vectors = has_line || has_block
 
     query_tokens.each do |token|
       expansions = [] of ExpandedToken
@@ -69,10 +74,10 @@ module Xerp::Query::Expansion
           kind: kind
         )
 
-        # Add semantic neighbors if line model is available
-        if has_line
+        # Add semantic neighbors from requested models
+        if has_vectors
           neighbors = get_neighbors(db, token_row.id, top_k, min_similarity,
-                                    weights, max_df_percent)
+                                    weights, max_df_percent, has_line, has_block)
           neighbors.each do |neighbor|
             expansions << ExpandedToken.new(
               original: token,
@@ -99,9 +104,9 @@ module Xerp::Query::Expansion
             )
 
             # Add semantic neighbors for lowercase match
-            if has_line
+            if has_vectors
               neighbors = get_neighbors(db, lower_row.id, top_k, min_similarity,
-                                        weights, max_df_percent)
+                                        weights, max_df_percent, has_line, has_block)
               neighbors.each do |neighbor|
                 # Adjust score to account for case mismatch penalty
                 expansions << ExpandedToken.new(
@@ -142,19 +147,46 @@ module Xerp::Query::Expansion
     count > 0
   end
 
-  # Gets neighbors from the line model with scoring.
+  # Gets neighbors from trained models with scoring.
   # Reranks with: score = w1*similarity + w2*idf + w3*feedback_boost
   def self.get_neighbors(db : DB::Database, token_id : Int64,
                          top_k : Int32, min_similarity : Float64,
                          weights : BlendWeights,
-                         max_df_percent : Float64 = DEFAULT_MAX_DF_PERCENT) : Array(NamedTuple(token: String, token_id: Int64, score: Float64, kind: Tokenize::TokenKind))
+                         max_df_percent : Float64 = DEFAULT_MAX_DF_PERCENT,
+                         use_line : Bool = true,
+                         use_block : Bool = false) : Array(NamedTuple(token: String, token_id: Int64, score: Float64, kind: Tokenize::TokenKind))
     # Fetch more candidates than we need for better reranking
     fetch_limit = top_k * 2
 
-    # Get line model neighbors
-    candidates = get_neighbors_for_model(db, token_id, Vectors::Cooccurrence::MODEL_LINE,
-                                         fetch_limit, min_similarity)
+    # Collect candidates from requested models
+    candidates_by_id = Hash(Int64, NamedTuple(token: String, token_id: Int64, similarity: Float64, kind: Tokenize::TokenKind, df: Int32)).new
 
+    if use_line
+      line_candidates = get_neighbors_for_model(db, token_id, Vectors::Cooccurrence::MODEL_LINE,
+                                                fetch_limit, min_similarity)
+      line_candidates.each do |c|
+        # Keep best similarity if seen from multiple models
+        if existing = candidates_by_id[c[:token_id]]?
+          candidates_by_id[c[:token_id]] = c if c[:similarity] > existing[:similarity]
+        else
+          candidates_by_id[c[:token_id]] = c
+        end
+      end
+    end
+
+    if use_block
+      block_candidates = get_neighbors_for_model(db, token_id, Vectors::Cooccurrence::MODEL_SCOPE,
+                                                 fetch_limit, min_similarity)
+      block_candidates.each do |c|
+        if existing = candidates_by_id[c[:token_id]]?
+          candidates_by_id[c[:token_id]] = c if c[:similarity] > existing[:similarity]
+        else
+          candidates_by_id[c[:token_id]] = c
+        end
+      end
+    end
+
+    candidates = candidates_by_id.values
     return [] of NamedTuple(token: String, token_id: Int64, score: Float64, kind: Tokenize::TokenKind) if candidates.empty?
 
     # Get feedback stats for candidates

@@ -95,6 +95,11 @@ module Xerp::CLI
       "grep": {
         "type": "boolean",
         "description": "Compact grep-like output"
+      },
+      "vector": {
+        "type": "string",
+        "default": "all",
+        "description": "Vector expansion: none, line, block, or all (default)"
       }
     },
     "required": ["query"]
@@ -317,6 +322,8 @@ module Xerp::CLI
     puts "  xerp index                        # Index current directory"
     puts "  xerp index --train                # Index and train vectors"
     puts "  xerp query \"retry backoff\"        # Search for intent"
+    puts "  xerp query retry --vector none    # No expansion (exact match)"
+    puts "  xerp query retry --vector line    # Line model expansion only"
     puts "  xerp terms retry                  # All sources (default)"
     puts "  xerp terms retry --salience line  # Line salience only"
     puts "  xerp terms retry --salience block # Block salience only"

@@ -27,6 +27,14 @@ module Xerp::CLI
       json_output = result["json"]?.try(&.as_bool) || false
       jsonl_output = result["jsonl"]?.try(&.as_bool) || false
       grep_output = result["grep"]?.try(&.as_bool) || false
+      vector_arg = result["vector"]?.try(&.as_s) || "all"
+
+      # Parse vector mode
+      vector_mode = parse_vector_mode(vector_arg)
+      unless vector_mode
+        STDERR.puts "Error: Invalid vector mode '#{vector_arg}'. Use: none, line, block, or all"
+        return 1
+      end
 
       file_filter : Regex? = nil
       if pattern = result["file"]?.try(&.as_s)
@@ -57,7 +65,8 @@ module Xerp::CLI
           file_filter: file_filter,
           file_type_filter: file_type_filter,
           max_snippet_lines: max_block_lines,
-          context_lines: context_lines
+          context_lines: context_lines,
+          vector_mode: vector_mode
         )
 
         response = engine.run(query_text, opts)
@@ -79,6 +88,16 @@ module Xerp::CLI
       rescue ex
         STDERR.puts "Error: #{ex.message}"
         1
+      end
+    end
+
+    private def self.parse_vector_mode(arg : String) : Query::VectorMode?
+      case arg.downcase
+      when "none"  then Query::VectorMode::None
+      when "line"  then Query::VectorMode::Line
+      when "block" then Query::VectorMode::Block
+      when "all"   then Query::VectorMode::All
+      else              nil
       end
     end
   end
