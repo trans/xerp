@@ -32,3 +32,27 @@ Missing combinations:
   - Option A: Add `--ids` flag to show result_ids in human output
   - Option B: Allow `mark [N]` to reference last query results
   - Option C: Keep as JSON-only workflow for scripting
+
+## Model Architecture
+
+Current coverage (line/block × salience/vector/centroid):
+
+|           | Salience | Vector | Centroid |
+|-----------|----------|--------|----------|
+| **Line**  | ❌       | ✅     | N/A      |
+| **Block** | ✅       | ✅     | ❌       |
+
+- [ ] **Line salience**: query-time term extraction from matching lines (more granular than block)
+- [ ] **Block centroid**: average token vectors → single block embedding for block-to-block similarity
+
+## Block Structure Issues
+
+Current indent adapter creates a block for every non-blank line:
+
+- [ ] **`end` noise**: closing keywords get their own blocks and co-occur with siblings
+  - `end` co-occurs with `def foo`, `# doc comment` as siblings
+  - Consider filtering `end`/`}`/`]` from sibling sweeps
+- [ ] **Multi-line headers**: only first line captured
+  - `def foo(arg1,\n         arg2)` → only `def foo(arg1,` is header
+- [ ] **Doc comments as siblings**: `# doc` is sibling to `def foo`, not associated with it
+  - Consider attaching preceding comments to following block
