@@ -33,7 +33,7 @@ TF-IDF usage by component:
 | Component | TF-IDF? | Notes |
 |-----------|---------|-------|
 | Co-occurrence vectors | No | Raw counts, keeps optionality |
-| Token expansion | Light | IDF reranking (w=0.1) |
+| Token expansion | Light | IDF reranking (w=0.1) - maybe remove? |
 | Block centroids | Yes | IDF-weighted at training time |
 | Salience scoring | Yes | Full TF-IDF |
 
@@ -68,3 +68,27 @@ Current indent adapter creates a block for every non-blank line:
   - `def foo(arg1,\n         arg2)` → only `def foo(arg1,` is header
 - [ ] **Doc comments as siblings**: `# doc` is sibling to `def foo`, not associated with it
   - Consider attaching preceding comments to following block
+
+## Schema Additions
+
+- [ ] **`tf_total` in tokens table**: Total term count across project
+  - We have `df` (document frequency), but not total occurrences
+  - Could derive from postings, but storing directly is faster
+  - Might help distinguish "concentrated" vs "spread" terms
+
+- [x] **Remove `header_text` from blocks**: Use `line_cache` instead
+  - Header read via JOIN on `start_line`
+  - Footer read via `end_line` (no separate column needed)
+
+- [ ] **Header block detection**: Identify contiguous header sections
+  - Header block = doc comment + signature at same indent level
+  - Example:
+    ```
+    # documentation       <- header block starts
+    def foo(x)            <- header block continues
+      bar                 <- body
+    end                   <- footer
+    ```
+  - Use TF/salience of header/footer terms to guess keywords
+  - Tricky: distinguishing footer from next header at same indent
+  - Default: assume all same-indent preceding lines are header (except maybe first line)

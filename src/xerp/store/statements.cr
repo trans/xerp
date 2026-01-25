@@ -136,11 +136,11 @@ module Xerp::Store
     # --- Blocks ---
 
     def self.insert_block(db : DB::Database, file_id : Int64, kind : String, level : Int32,
-                          line_start : Int32, line_end : Int32, header_text : String?,
+                          line_start : Int32, line_end : Int32,
                           parent_block_id : Int64?) : Int64
-      db.exec(<<-SQL, file_id, kind, level, line_start, line_end, header_text, parent_block_id)
-        INSERT INTO blocks (file_id, kind, level, start_line, end_line, header_text, parent_block_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+      db.exec(<<-SQL, file_id, kind, level, line_start, line_end, parent_block_id)
+        INSERT INTO blocks (file_id, kind, level, start_line, end_line, parent_block_id)
+        VALUES (?, ?, ?, ?, ?, ?)
       SQL
       db.scalar("SELECT last_insert_rowid()").as(Int64)
     end
@@ -148,13 +148,13 @@ module Xerp::Store
     def self.select_blocks_by_file(db : DB::Database, file_id : Int64) : Array(BlockRow)
       results = [] of BlockRow
       db.query(<<-SQL, file_id) do |rs|
-        SELECT block_id, file_id, kind, level, start_line, end_line, header_text, parent_block_id, token_count
+        SELECT block_id, file_id, kind, level, start_line, end_line, parent_block_id, token_count
         FROM blocks WHERE file_id = ?
       SQL
         rs.each do
           results << BlockRow.new(
             rs.read(Int64), rs.read(Int64), rs.read(String), rs.read(Int32),
-            rs.read(Int32), rs.read(Int32), rs.read(String?), rs.read(Int64?), rs.read(Int32)
+            rs.read(Int32), rs.read(Int32), rs.read(Int64?), rs.read(Int32)
           )
         end
       end
@@ -162,8 +162,8 @@ module Xerp::Store
     end
 
     def self.select_block_by_id(db : DB::Database, block_id : Int64) : BlockRow?
-      db.query_one?(<<-SQL, block_id, as: {Int64, Int64, String, Int32, Int32, Int32, String?, Int64?, Int32})
-        SELECT block_id, file_id, kind, level, start_line, end_line, header_text, parent_block_id, token_count
+      db.query_one?(<<-SQL, block_id, as: {Int64, Int64, String, Int32, Int32, Int32, Int64?, Int32})
+        SELECT block_id, file_id, kind, level, start_line, end_line, parent_block_id, token_count
         FROM blocks WHERE block_id = ?
       SQL
         .try { |row| BlockRow.new(*row) }
@@ -310,17 +310,17 @@ module Xerp::Store
 
     # Selects a block with its header text from line_cache via join.
     def self.select_block_with_header(db : DB::Database, block_id : Int64) : {BlockRow, String?}?
-      result = db.query_one?(<<-SQL, block_id, as: {Int64, Int64, String, Int32, Int32, Int32, String?, Int64?, Int32, String?})
+      result = db.query_one?(<<-SQL, block_id, as: {Int64, Int64, String, Int32, Int32, Int32, Int64?, Int32, String?})
         SELECT b.block_id, b.file_id, b.kind, b.level, b.start_line, b.end_line,
-               b.header_text, b.parent_block_id, b.token_count, lc.text
+               b.parent_block_id, b.token_count, lc.text
         FROM blocks b
         LEFT JOIN line_cache lc ON b.file_id = lc.file_id AND b.start_line = lc.line_num
         WHERE b.block_id = ?
       SQL
       return nil unless result
 
-      block = BlockRow.new(result[0], result[1], result[2], result[3], result[4], result[5], result[6], result[7], result[8])
-      header = result[9]  # from line_cache
+      block = BlockRow.new(result[0], result[1], result[2], result[3], result[4], result[5], result[6], result[7])
+      header = result[8]  # from line_cache
       {block, header}
     end
 

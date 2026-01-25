@@ -20,7 +20,6 @@ module Xerp::Index
 
       # First pass: insert all blocks and cache their start lines
       result.blocks.each do |block|
-        # Insert block (header_text column is deprecated, pass nil)
         block_id = Store::Statements.insert_block(
           db,
           file_id: file_id,
@@ -28,7 +27,6 @@ module Xerp::Index
           level: block.level,
           line_start: block.line_start,
           line_end: block.line_end,
-          header_text: nil,  # No longer used - we use line_cache
           parent_block_id: nil  # Set later
         )
         block_ids << block_id
