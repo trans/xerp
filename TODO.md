@@ -59,15 +59,36 @@ Current coverage (line/block × salience/vector/centroid):
 
 ## Block Structure Issues
 
-Current indent adapter creates a block for every non-blank line:
+Current indent adapter creates a block for every non-blank line. This is wrong.
 
-- [ ] **`end` noise**: closing keywords get their own blocks and co-occur with siblings
-  - `end` co-occurs with `def foo`, `# doc comment` as siblings
+- [ ] **Merge consecutive lines at same indent into one block**
+  - Current: each line at indent 0 is its own block (many blocks)
+  - Correct: consecutive lines at same indent = one block
+  - New block only starts when indent CHANGES (increase or decrease)
+  - Example:
+    ```
+    end         <- indent 0
+    HERE        <- indent 0
+    def bar     <- indent 0
+      stuff     <- indent 2
+    ```
+    Should be: Block `end\nHERE\ndef bar` with child block `stuff`
+    Not: 4 separate blocks
+  - Much fewer blocks, cleaner structure, less co-occurrence noise
+
+- [ ] **Split merged headers into footer/header portions**
+  - After merging, `end\nHERE\ndef bar` needs splitting:
+    - Footer: `end` (belongs to previous logical unit)
+    - Header: `HERE\ndef bar` (belongs to next logical unit)
+  - Use heuristics to detect footer keywords (`end`, `}`, etc.)
+
+- [ ] **`end` noise**: closing keywords co-occur with siblings
+  - Less of an issue after merging, but still relevant for co-occurrence
   - Consider filtering `end`/`}`/`]` from sibling sweeps
 - [ ] **Multi-line headers**: only first line captured
   - `def foo(arg1,\n         arg2)` → only `def foo(arg1,` is header
 - [ ] **Doc comments as siblings**: `# doc` is sibling to `def foo`, not associated with it
-  - Consider attaching preceding comments to following block
+  - Less of an issue after merging (they'll be in same block)
 
 ## Schema Additions
 
