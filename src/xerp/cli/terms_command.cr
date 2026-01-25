@@ -28,10 +28,10 @@ module Xerp::CLI
         return 1
       end
 
-      # Parse vector granularity
-      vector = parse_granularity(vector_arg)
+      # Parse vector granularity (also allows centroid)
+      vector = parse_granularity(vector_arg, allow_centroid: true)
       unless vector
-        STDERR.puts "Error: Invalid vector '#{vector_arg}'. Use: none, line, block, or all"
+        STDERR.puts "Error: Invalid vector '#{vector_arg}'. Use: none, line, block, all, or centroid"
         return 1
       end
 
@@ -102,13 +102,14 @@ module Xerp::CLI
       end
     end
 
-    private def self.parse_granularity(arg : String) : Query::Terms::Granularity?
+    private def self.parse_granularity(arg : String, allow_centroid : Bool = false) : Query::Terms::Granularity?
       case arg.downcase
-      when "none"  then Query::Terms::Granularity::None
-      when "line"  then Query::Terms::Granularity::Line
-      when "block" then Query::Terms::Granularity::Block
-      when "all"   then Query::Terms::Granularity::All
-      else              nil
+      when "none"     then Query::Terms::Granularity::None
+      when "line"     then Query::Terms::Granularity::Line
+      when "block"    then Query::Terms::Granularity::Block
+      when "all"      then Query::Terms::Granularity::All
+      when "centroid" then allow_centroid ? Query::Terms::Granularity::Centroid : nil
+      else                 nil
       end
     end
   end

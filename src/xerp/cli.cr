@@ -192,7 +192,7 @@ module Xerp::CLI
       "vector": {
         "type": "string",
         "default": "all",
-        "description": "Trained vectors: none, line, block, or all (default)"
+        "description": "Trained vectors: none, line, block, all (default), or centroid"
       },
       "root": {
         "type": "string",
@@ -323,6 +323,7 @@ module Xerp::CLI
     puts "  xerp terms retry --vector line    # Line vectors only"
     puts "  xerp terms retry --vector none    # Salience only (no vectors)"
     puts "  xerp terms retry --salience none  # Vectors only (no salience)"
+    puts "  xerp terms retry --vector centroid  # Centroid similarity"
     puts "  xerp outline                      # Show code structure"
     puts "  xerp outline --file 'src/*.cr'    # Filter by file pattern"
     puts "  xerp mark abc123 --useful         # Mark result as useful"

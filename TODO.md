@@ -2,14 +2,7 @@
 
 ## Query Expansion Control
 
-- [ ] Add `--source` flag to `query` command to control which models are used for expansion
-- [ ] Allow flexible source combinations (comma-separated): `--source scope,line`
-
-Currently `terms` supports: scope, line, block, vector (line+block), combined (scope+line+block)
-
-Missing combinations:
-- scope+line
-- scope+block
+- [ ] Add `--salience`/`--vector` flags to `query` command (like `terms` has)
 
 ## Outline Enhancements
 
@@ -39,11 +32,11 @@ Current coverage (line/block × salience/vector/centroid):
 
 |           | Salience | Vector | Centroid |
 |-----------|----------|--------|----------|
-| **Line**  | ❌       | ✅     | N/A      |
-| **Block** | ✅       | ✅     | ❌       |
+| **Line**  | ✅       | ✅     | N/A      |
+| **Block** | ✅       | ✅     | ✅       |
 
-- [ ] **Line salience**: query-time term extraction from matching lines (more granular than block)
-- [ ] **Block centroid**: average token vectors → single block embedding for block-to-block similarity
+- [x] **Line salience**: query-time term extraction from matching lines (more granular than block)
+- [x] **Block centroid**: `--vector centroid` computes query centroid and finds semantically similar terms
 
 ## Block Structure Issues
 
