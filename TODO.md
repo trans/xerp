@@ -59,9 +59,9 @@ Current coverage (line/block × salience/vector/centroid):
 
 ## Block Structure Issues
 
-Current indent adapter creates a block for every non-blank line. This is wrong.
+~~Current indent adapter creates a block for every non-blank line. This is wrong.~~
 
-- [ ] **Merge consecutive lines at same indent into one block**
+- [x] **Merge consecutive lines at same indent into one block**
   - Current: each line at indent 0 is its own block (many blocks)
   - Correct: consecutive lines at same indent = one block
   - New block only starts when indent CHANGES (increase or decrease)

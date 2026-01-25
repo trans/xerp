@@ -25,17 +25,18 @@ module Xerp::Adapters
       indent_levels = lines.map { |line| indent_level(line, effective_tab_width) }
 
       # Build blocks using stack-based algorithm
+      # Key change: only create new block when indent CHANGES, not for every line
       blocks = [] of BlockInfo
       block_idx_by_line = Array(Int32).new(lines.size, -1)
 
-      # Stack entries: {indent_level, block_index, line_start}
-      stack = [{-1, -1, 0}]  # sentinel
+      # Stack entries: {indent_level, block_index}
+      stack = [{-1, -1}]  # sentinel
 
       lines.each_with_index do |line, idx|
         line_num = idx + 1
         level = indent_levels[idx]
 
-        # Skip blank lines - they inherit the previous block
+        # Skip blank lines - they inherit the current block
         if line.strip.empty?
           if stack.size > 1
             block_idx_by_line[idx] = stack.last[1]
@@ -43,41 +44,73 @@ module Xerp::Adapters
           next
         end
 
-        # Pop blocks that are at same or higher indent level
-        while stack.size > 1 && stack.last[0] >= level
-          # Close the block
-          closed = stack.pop
-          if closed[1] >= 0
-            # Update line_end for the closed block
-            old_block = blocks[closed[1]]
-            blocks[closed[1]] = BlockInfo.new(
-              kind: old_block.kind,
-              level: old_block.level,
-              line_start: old_block.line_start,
-              line_end: line_num - 1,
-              header_text: old_block.header_text,
-              parent_index: old_block.parent_index
-            )
+        current_level = stack.last[0]
+
+        if level > current_level
+          # Indent increased - start a new child block
+          parent_idx = stack.last[1]
+          parent_idx = nil if parent_idx < 0
+
+          header = extract_header(line)
+          block_idx = blocks.size
+          blocks << BlockInfo.new(
+            kind: "layout",
+            level: level,
+            line_start: line_num,
+            line_end: lines.size,  # will be updated when closed
+            header_text: header,
+            parent_index: parent_idx
+          )
+
+          stack << {level, block_idx}
+          block_idx_by_line[idx] = block_idx
+
+        elsif level < current_level
+          # Indent decreased - close blocks until we find matching level
+          while stack.size > 1 && stack.last[0] > level
+            closed = stack.pop
+            if closed[1] >= 0
+              # Update line_end for the closed block
+              old_block = blocks[closed[1]]
+              blocks[closed[1]] = BlockInfo.new(
+                kind: old_block.kind,
+                level: old_block.level,
+                line_start: old_block.line_start,
+                line_end: line_num - 1,
+                header_text: old_block.header_text,
+                parent_index: old_block.parent_index
+              )
+            end
           end
+
+          # Check if we're back at an existing level or need a new block
+          if stack.last[0] == level
+            # Same level as parent - extend that block (it continues)
+            block_idx_by_line[idx] = stack.last[1]
+          else
+            # New level (between levels) - start new block
+            parent_idx = stack.last[1]
+            parent_idx = nil if parent_idx < 0
+
+            header = extract_header(line)
+            block_idx = blocks.size
+            blocks << BlockInfo.new(
+              kind: "layout",
+              level: level,
+              line_start: line_num,
+              line_end: lines.size,
+              header_text: header,
+              parent_index: parent_idx
+            )
+
+            stack << {level, block_idx}
+            block_idx_by_line[idx] = block_idx
+          end
+
+        else
+          # Same indent level - extend current block (don't create new)
+          block_idx_by_line[idx] = stack.last[1]
         end
-
-        # Start a new block
-        parent_idx = stack.last[1]
-        parent_idx = nil if parent_idx < 0
-
-        header = extract_header(line)
-        block_idx = blocks.size
-        blocks << BlockInfo.new(
-          kind: "layout",
-          level: level,
-          line_start: line_num,
-          line_end: lines.size,  # will be updated when closed
-          header_text: header,
-          parent_index: parent_idx
-        )
-
-        stack << {level, block_idx, line_num}
-        block_idx_by_line[idx] = block_idx
       end
 
       # Close remaining blocks
