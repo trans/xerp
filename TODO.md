@@ -34,6 +34,16 @@
   - `def foo(arg1,\n         arg2)` → only `def foo(arg1,` is header
 - [ ] **Doc comments as siblings**: `# doc` is sibling to `def foo`, not associated with it
 
+## Configuration
+
+- [ ] **Consider jargon's `load_config()` for config loading**
+  - Currently using custom YAML loader (`.config/xerp.yaml`)
+  - Jargon 0.8+ has `load_config()` returning `JSON::Any?`
+  - Could unify config format (JSON) with CLI schema
+  - Challenge: nested structure (`index:`, `train:`, `query:`) vs flat CLI options
+  - Challenge: prefer YAML over JSON for config files
+  - Maybe: jargon could add YAML support, or we extract subcommand sections manually
+
 ## Schema Additions
 
 - [ ] **`tf_total` in tokens table**: Total term count across project
