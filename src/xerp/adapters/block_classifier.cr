@@ -14,10 +14,8 @@ module Xerp::Adapters
     # Config key-value patterns
     CONFIG_PATTERNS = /^[\w\-_.]+\s*[:=]/
 
-    # Code-heavy punctuation
-    CODE_SYMBOLS = Set{'(', ')', '{', '}', '[', ']', ';', ':', ',', '.', '=', '<', '>', '+', '-', '*', '/', '&', '|', '!', '?', '@', '$', '%', '^', '~'}
-
-    # Common programming keywords
+    # Common programming keywords (fallback - ideally use learned keywords from corpus)
+    # TODO: Replace with keywords learned from `xerp keywords` command
     CODE_KEYWORDS = Set{
       "def", "end", "class", "module", "if", "else", "elsif", "unless",
       "while", "for", "do", "return", "yield", "begin", "rescue", "ensure",
@@ -38,8 +36,9 @@ module Xerp::Adapters
         return BlockKind::Comment
       end
 
-      # Check for config pattern
-      if stats[:config_ratio] > 0.5 && stats[:symbol_density] < 0.15
+      # Check for config pattern (key: value or key=value lines)
+      # Config has moderate symbol density (colons, equals) but not as much as code
+      if stats[:config_ratio] > 0.5 && stats[:keyword_ratio] < 0.1
         return BlockKind::Config
       end
 
@@ -97,10 +96,10 @@ module Xerp::Adapters
           config_lines += 1
         end
 
-        # Count symbols and characters
+        # Count symbols and characters (punctuation = not alphanumeric, not whitespace)
         stripped.each_char do |c|
           total_chars += 1
-          total_symbols += 1 if CODE_SYMBOLS.includes?(c)
+          total_symbols += 1 if !c.alphanumeric? && !c.whitespace?
         end
 
         # Check for camelCase/PascalCase identifiers
