@@ -10,7 +10,7 @@ shards:
 
   jargon:
     git: https://github.com/trans/jargon.git
-    version: 0.7.0
+    version: 0.8.0
 
   sqlite3:
     git: https://github.com/crystal-lang/crystal-sqlite3.git
