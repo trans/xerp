@@ -10,19 +10,22 @@ module Xerp::CLI
       getter token : String
       getter header_count : Int32
       getter footer_count : Int32
-      getter total_count : Int32
+      getter total_headers : Int32
+      getter total_footers : Int32
 
-      def initialize(@token, @header_count, @footer_count, @total_count)
+      def initialize(@token, @header_count, @footer_count, @total_headers, @total_footers)
       end
 
+      # What % of header lines contain this token?
       def header_ratio : Float64
-        return 0.0 if total_count == 0
-        header_count.to_f64 / total_count
+        return 0.0 if total_headers == 0
+        header_count.to_f64 / total_headers
       end
 
+      # What % of footer lines contain this token?
       def footer_ratio : Float64
-        return 0.0 if total_count == 0
-        footer_count.to_f64 / total_count
+        return 0.0 if total_footers == 0
+        footer_count.to_f64 / total_footers
       end
     end
 
@@ -59,7 +62,9 @@ module Xerp::CLI
 
     # Analyzes token positions across all blocks.
     private def self.analyze_positions(database : Store::Database, min_count : Int32) : Array(TokenPositionStats)
-      stats = Hash(String, {Int32, Int32, Int32}).new { |h, k| h[k] = {0, 0, 0} }
+      stats = Hash(String, {Int32, Int32}).new { |h, k| h[k] = {0, 0} }
+      total_headers = 0
+      total_footers = 0
 
       database.with_migrated_connection do |db|
         # Get header lines from line_cache (these are the actual semantic headers)
@@ -71,6 +76,7 @@ module Xerp::CLI
             header_lines[file_id] << line_num
           end
         end
+        total_headers = header_lines.values.sum(&.size)
 
         # Get footer lines from blocks (end_line is where blocks end)
         footer_lines = Hash(Int64, Set(Int32)).new { |h, k| h[k] = Set(Int32).new }
@@ -81,6 +87,7 @@ module Xerp::CLI
             footer_lines[file_id] << end_line
           end
         end
+        total_footers = footer_lines.values.sum(&.size)
 
         # Get all postings with line information
         db.query(<<-SQL) do |rs|
@@ -97,7 +104,6 @@ module Xerp::CLI
 
             header_count = 0
             footer_count = 0
-            total_count = lines.size
 
             file_headers = header_lines[file_id]
             file_footers = footer_lines[file_id]
@@ -109,60 +115,64 @@ module Xerp::CLI
 
             # Accumulate stats
             prev = stats[token]
-            stats[token] = {
-              prev[0] + header_count,
-              prev[1] + footer_count,
-              prev[2] + total_count
-            }
+            stats[token] = {prev[0] + header_count, prev[1] + footer_count}
           end
         end
       end
 
-      # Convert to array and filter by min_count
-      stats.compact_map do |token, (hc, fc, tc)|
-        next nil if tc < min_count
-        TokenPositionStats.new(token, hc, fc, tc)
+      # Convert to array and filter by min_count (header + footer)
+      stats.compact_map do |token, (hc, fc)|
+        next nil if (hc + fc) < min_count
+        TokenPositionStats.new(token, hc, fc, total_headers, total_footers)
       end
     end
 
     private def self.print_human(stats : Array(TokenPositionStats), top_k : Int32)
+      return if stats.empty?
+      total_headers = stats.first.total_headers
+      total_footers = stats.first.total_footers
+
       # Sort by header ratio
       header_keywords = stats.sort_by { |s| -s.header_ratio }.first(top_k)
       # Sort by footer ratio
       footer_keywords = stats.sort_by { |s| -s.footer_ratio }.first(top_k)
 
-      puts "Header Keywords (tokens that frequently start blocks):"
-      puts "  %-20s %8s %8s %8s" % ["TOKEN", "HEADER", "TOTAL", "RATIO"]
+      puts "Header Keywords (% of #{total_headers} header lines containing token):"
+      puts "  %-20s %8s %8s" % ["TOKEN", "COUNT", "RATIO"]
       header_keywords.each do |s|
-        puts "  %-20s %8d %8d %7.1f%%" % [s.token, s.header_count, s.total_count, s.header_ratio * 100]
+        puts "  %-20s %8d %7.1f%%" % [s.token, s.header_count, s.header_ratio * 100]
       end
 
       puts
-      puts "Footer Keywords (tokens that frequently end blocks):"
-      puts "  %-20s %8s %8s %8s" % ["TOKEN", "FOOTER", "TOTAL", "RATIO"]
+      puts "Footer Keywords (% of #{total_footers} footer lines containing token):"
+      puts "  %-20s %8s %8s" % ["TOKEN", "COUNT", "RATIO"]
       footer_keywords.each do |s|
-        puts "  %-20s %8d %8d %7.1f%%" % [s.token, s.footer_count, s.total_count, s.footer_ratio * 100]
+        puts "  %-20s %8d %7.1f%%" % [s.token, s.footer_count, s.footer_ratio * 100]
       end
     end
 
     private def self.print_json(stats : Array(TokenPositionStats), top_k : Int32)
+      return puts "{}" if stats.empty?
+      total_headers = stats.first.total_headers
+      total_footers = stats.first.total_footers
+
       header_keywords = stats.sort_by { |s| -s.header_ratio }.first(top_k)
       footer_keywords = stats.sort_by { |s| -s.footer_ratio }.first(top_k)
 
       result = {
+        "total_headers" => total_headers,
+        "total_footers" => total_footers,
         "header_keywords" => header_keywords.map { |s|
           {
             "token" => s.token,
-            "header_count" => s.header_count,
-            "total_count" => s.total_count,
+            "count" => s.header_count,
             "ratio" => s.header_ratio.round(4)
           }
         },
         "footer_keywords" => footer_keywords.map { |s|
           {
             "token" => s.token,
-            "footer_count" => s.footer_count,
-            "total_count" => s.total_count,
+            "count" => s.footer_count,
             "ratio" => s.footer_ratio.round(4)
           }
         }
