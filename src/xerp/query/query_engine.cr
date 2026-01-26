@@ -76,7 +76,8 @@ module Xerp::Query
           expanded = Expansion.expand(db, query_tokens, vector_mode: opts.vector_mode, on_the_fly: opts.on_the_fly)
 
           # Score scopes using DESIGN02-00 algorithm
-          cluster_mode = @config.cluster_mode == "concentration" ? ScopeScorer::ClusterMode::Concentration : ScopeScorer::ClusterMode::Centroid
+          # Use centroid similarity when augment is on, concentration otherwise
+          cluster_mode = opts.vector_mode.none? ? ScopeScorer::ClusterMode::Concentration : ScopeScorer::ClusterMode::Centroid
           scope_scores = ScopeScorer.score_scopes(db, expanded, opts, cluster_mode)
           total_candidates = scope_scores.size
 

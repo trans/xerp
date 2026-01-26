@@ -228,7 +228,6 @@ query:
   expansion_top_k: 8      # neighbors per query token
   min_similarity: 0.25    # minimum expansion similarity
   max_df_percent: 22.0    # filter terms in >N% of files
-  cluster_mode: centroid  # centroid (semantic) or concentration (hit entropy)
 ```
 
 ## How it works

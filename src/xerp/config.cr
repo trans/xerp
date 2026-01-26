@@ -58,9 +58,6 @@ module Xerp
     property w_idf : Float64 = 0.1
     property w_feedback : Float64 = 0.2
 
-    # Clustering mode: "centroid" (semantic) or "concentration" (hit distribution)
-    property cluster_mode : String = "centroid"
-
     CONFIG_FILENAME = "xerp.yaml"
 
     def initialize(@workspace_root : String, db_path : String? = nil)
@@ -112,7 +109,6 @@ module Xerp
         @w_line = query["w_line"]?.try(&.as_f) || @w_line
         @w_idf = query["w_idf"]?.try(&.as_f) || @w_idf
         @w_feedback = query["w_feedback"]?.try(&.as_f) || @w_feedback
-        @cluster_mode = query["cluster_mode"]?.try(&.as_s) || @cluster_mode
       end
     end
 
@@ -159,7 +155,6 @@ module Xerp
         w_line: 1.0             # Weight for line model similarity
         w_idf: 0.1              # Weight for IDF boost
         w_feedback: 0.2         # Weight for feedback boost
-        cluster_mode: centroid  # centroid (semantic) or concentration (hit entropy)
       YAML
 
       File.write(path, sample)
