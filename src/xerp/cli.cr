@@ -8,6 +8,7 @@ require "./cli/mark_command"
 require "./cli/train_command"
 require "./cli/terms_command"
 require "./cli/outline_command"
+require "./cli/keywords_command"
 
 module Xerp::CLI
   VERSION = Xerp::VERSION
@@ -270,6 +271,31 @@ module Xerp::CLI
     }
   })
 
+  KEYWORDS_SCHEMA = %({
+    "type": "object",
+    "description": "Discover header/footer keywords from corpus",
+    "properties": {
+      "root": {
+        "type": "string",
+        "description": "Workspace root directory"
+      },
+      "top": {
+        "type": "integer",
+        "default": 20,
+        "description": "Number of keywords to show"
+      },
+      "min-count": {
+        "type": "integer",
+        "default": 5,
+        "description": "Minimum occurrences to consider"
+      },
+      "json": {
+        "type": "boolean",
+        "description": "Output as JSON"
+      }
+    }
+  })
+
   def self.run(args : Array(String)) : Int32
     # Handle top-level flags before Jargon parsing
     if args.empty? || args == ["help"] || args == ["-h"] || args == ["--help"]
@@ -290,6 +316,7 @@ module Xerp::CLI
     cli.subcommand("train", TRAIN_SCHEMA)
     cli.subcommand("terms", TERMS_SCHEMA)
     cli.subcommand("outline", OUTLINE_SCHEMA)
+    cli.subcommand("keywords", KEYWORDS_SCHEMA)
     cli.default_subcommand("query")
 
     result = cli.parse(args)
@@ -312,6 +339,8 @@ module Xerp::CLI
       TermsCommand.run(result)
     when "outline"
       OutlineCommand.run(result)
+    when "keywords"
+      KeywordsCommand.run(result)
     else
       print_usage
       0
@@ -328,6 +357,7 @@ module Xerp::CLI
     puts "  query    Search indexed content (alias: q)"
     puts "  terms    Find related terms (salience, vector, or both)"
     puts "  outline  Show structural outline of indexed files"
+    puts "  keywords Discover header/footer keywords from corpus"
     puts "  mark     Record feedback on results"
     puts "  train    Train semantic token vectors"
     puts "  version  Show version"
