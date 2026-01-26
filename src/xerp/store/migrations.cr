@@ -2,7 +2,7 @@ require "sqlite3"
 
 module Xerp::Store
   module Migrations
-    CURRENT_VERSION = 8
+    CURRENT_VERSION = 9
 
     # Runs all pending migrations on the database.
     def self.migrate!(db : DB::Database) : Nil
@@ -37,6 +37,7 @@ module Xerp::Store
       when 6 then migrate_v6(db)
       when 7 then migrate_v7(db)
       when 8 then migrate_v8(db)
+      when 9 then migrate_v9(db)
       else        raise "Unknown migration version: #{version}"
       end
     end
@@ -436,6 +437,23 @@ module Xerp::Store
           vector     BLOB NOT NULL,
           PRIMARY KEY (block_id, model_id)
         )
+      SQL
+    end
+
+    # Migration v9: Add keywords table for learned header/footer/comment keywords
+    private def self.migrate_v9(db : DB::Database) : Nil
+      db.exec <<-SQL
+        CREATE TABLE IF NOT EXISTS keywords (
+          token   TEXT NOT NULL,
+          kind    TEXT NOT NULL,
+          count   INTEGER NOT NULL,
+          ratio   REAL NOT NULL,
+          PRIMARY KEY (token, kind)
+        )
+      SQL
+
+      db.exec <<-SQL
+        CREATE INDEX idx_keywords_kind_ratio ON keywords(kind, ratio DESC)
       SQL
     end
   end

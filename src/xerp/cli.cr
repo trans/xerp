@@ -292,6 +292,10 @@ module Xerp::CLI
       "json": {
         "type": "boolean",
         "description": "Output as JSON"
+      },
+      "save": {
+        "type": "boolean",
+        "description": "Save keywords to database"
       }
     }
   })

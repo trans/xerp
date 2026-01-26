@@ -35,6 +35,7 @@ module Xerp::CLI
       top_k = result["top"]?.try(&.as_i) || 20
       min_count = result["min-count"]?.try(&.as_i) || 5
       json_output = result["json"]?.try(&.as_bool) || false
+      save_to_db = result["save"]?.try(&.as_bool) || false
 
       unless Dir.exists?(root)
         STDERR.puts "Error: Directory not found: #{root}"
@@ -46,11 +47,17 @@ module Xerp::CLI
         db = Store::Database.new(config.db_path)
 
         stats = analyze_positions(db, min_count)
+        first_chars = analyze_first_chars(db, root)
+
+        if save_to_db
+          save_keywords(db, stats, first_chars, top_k)
+          puts "Saved keywords to database" unless json_output
+        end
 
         if json_output
           print_json(stats, top_k)
         else
-          print_human(stats, top_k, db, root)
+          print_human(stats, top_k, first_chars)
         end
 
         0
@@ -127,7 +134,7 @@ module Xerp::CLI
       end
     end
 
-    private def self.print_human(stats : Array(TokenPositionStats), top_k : Int32, database : Store::Database, workspace_root : String)
+    private def self.print_human(stats : Array(TokenPositionStats), top_k : Int32, first_char_counts : Hash(Char, Int32))
       return if stats.empty?
       total_headers = stats.first.total_headers
       total_footers = stats.first.total_footers
@@ -150,15 +157,53 @@ module Xerp::CLI
         puts "  %-20s %8d %7.1f%%" % [s.token, s.footer_count, s.footer_ratio * 100]
       end
 
-      # Analyze first-char patterns (comment markers)
+      # Show first-char patterns (comment markers)
       puts
       puts "Line Start Characters (potential comment markers):"
-      first_char_counts = analyze_first_chars(database, workspace_root)
       total_lines = first_char_counts.values.sum
       first_char_counts.to_a.sort_by { |(_, count)| -count }.first(15).each do |(char, count)|
         ratio = count.to_f64 / total_lines * 100
         display = char == ' ' ? "' '" : char == '\t' ? "'\\t'" : char.to_s
         puts "  %-6s %8d %7.1f%%" % [display, count, ratio]
+      end
+    end
+
+    # Saves learned keywords to the database.
+    private def self.save_keywords(database : Store::Database, stats : Array(TokenPositionStats),
+                                    first_chars : Hash(Char, Int32), top_k : Int32)
+      return if stats.empty?
+
+      header_keywords = stats.sort_by { |s| -s.header_ratio }.first(top_k)
+      footer_keywords = stats.sort_by { |s| -s.footer_ratio }.first(top_k)
+
+      total_lines = first_chars.values.sum
+      comment_chars = first_chars.to_a
+        .sort_by { |(_, count)| -count }
+        .first(10)
+        .select { |(c, _)| !c.alphanumeric? }  # Only non-alphanumeric chars
+
+      database.with_migrated_connection do |db|
+        # Clear existing keywords
+        db.exec("DELETE FROM keywords")
+
+        # Insert header keywords
+        header_keywords.each do |s|
+          db.exec("INSERT INTO keywords (token, kind, count, ratio) VALUES (?, 'header', ?, ?)",
+                  s.token, s.header_count, s.header_ratio)
+        end
+
+        # Insert footer keywords
+        footer_keywords.each do |s|
+          db.exec("INSERT INTO keywords (token, kind, count, ratio) VALUES (?, 'footer', ?, ?)",
+                  s.token, s.footer_count, s.footer_ratio)
+        end
+
+        # Insert comment markers
+        comment_chars.each do |(char, count)|
+          ratio = count.to_f64 / total_lines
+          db.exec("INSERT INTO keywords (token, kind, count, ratio) VALUES (?, 'comment', ?, ?)",
+                  char.to_s, count, ratio)
+        end
       end
     end
 
