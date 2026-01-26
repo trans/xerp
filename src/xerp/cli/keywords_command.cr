@@ -50,7 +50,7 @@ module Xerp::CLI
         if json_output
           print_json(stats, top_k)
         else
-          print_human(stats, top_k)
+          print_human(stats, top_k, db, root)
         end
 
         0
@@ -127,7 +127,7 @@ module Xerp::CLI
       end
     end
 
-    private def self.print_human(stats : Array(TokenPositionStats), top_k : Int32)
+    private def self.print_human(stats : Array(TokenPositionStats), top_k : Int32, database : Store::Database, workspace_root : String)
       return if stats.empty?
       total_headers = stats.first.total_headers
       total_footers = stats.first.total_footers
@@ -149,6 +149,59 @@ module Xerp::CLI
       footer_keywords.each do |s|
         puts "  %-20s %8d %7.1f%%" % [s.token, s.footer_count, s.footer_ratio * 100]
       end
+
+      # Analyze first-char patterns (comment markers)
+      puts
+      puts "Line Start Characters (potential comment markers):"
+      first_char_counts = analyze_first_chars(database, workspace_root)
+      total_lines = first_char_counts.values.sum
+      first_char_counts.to_a.sort_by { |(_, count)| -count }.first(15).each do |(char, count)|
+        ratio = count.to_f64 / total_lines * 100
+        display = char == ' ' ? "' '" : char == '\t' ? "'\\t'" : char.to_s
+        puts "  %-6s %8d %7.1f%%" % [display, count, ratio]
+      end
+    end
+
+    private def self.analyze_first_chars(database : Store::Database, workspace_root : String) : Hash(Char, Int32)
+      counts = Hash(Char, Int32).new(0)
+      file_info = [] of {Int64, String}
+      footer_lines = Hash(Int64, Set(Int32)).new { |h, k| h[k] = Set(Int32).new }
+
+      database.with_migrated_connection do |db|
+        db.query("SELECT file_id, rel_path FROM files") do |rs|
+          rs.each do
+            file_info << {rs.read(Int64), rs.read(String)}
+          end
+        end
+
+        # Get footer lines to exclude
+        db.query("SELECT file_id, end_line FROM blocks") do |rs|
+          rs.each do
+            file_id = rs.read(Int64)
+            end_line = rs.read(Int32)
+            footer_lines[file_id] << end_line
+          end
+        end
+      end
+
+      # Read all indexed files and count first non-whitespace char per line
+      # Exclude footer lines (end, }, etc.)
+      file_info.each do |(file_id, rel_path)|
+        path = File.join(workspace_root, rel_path)
+        next unless File.exists?(path)
+        file_footers = footer_lines[file_id]
+        line_num = 0
+        File.each_line(path) do |line|
+          line_num += 1
+          next if file_footers.includes?(line_num)
+          stripped = line.lstrip
+          if stripped.size > 0
+            counts[stripped[0]] += 1
+          end
+        end
+      end
+
+      counts
     end
 
     private def self.print_json(stats : Array(TokenPositionStats), top_k : Int32)
