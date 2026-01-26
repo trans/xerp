@@ -49,6 +49,26 @@ module Xerp::CLI
         "default": 10,
         "description": "Number of results"
       },
+      "line": {
+        "type": "boolean",
+        "short": "l",
+        "description": "Line mode only (unit + vectors)"
+      },
+      "block": {
+        "type": "boolean",
+        "short": "b",
+        "description": "Block mode only (unit + vectors)"
+      },
+      "expand": {
+        "type": "boolean",
+        "short": "e",
+        "description": "Expand query with similar terms"
+      },
+      "no-salience": {
+        "type": "boolean",
+        "short": "n",
+        "description": "Disable TF-IDF salience weighting (raw similarity)"
+      },
       "no-ancestry": {
         "type": "boolean",
         "description": "Hide block ancestry chain"
@@ -95,23 +115,6 @@ module Xerp::CLI
       "grep": {
         "type": "boolean",
         "description": "Compact grep-like output"
-      },
-      "vector": {
-        "type": "string",
-        "default": "all",
-        "description": "Vector expansion: none, line, block, or all (default)"
-      },
-      "raw": {
-        "type": "boolean",
-        "description": "Raw TF-IDF scoring (ignore vector similarity weights)"
-      },
-      "semantic": {
-        "type": "boolean",
-        "description": "Search by block centroid similarity (semantic search)"
-      },
-      "on-the-fly": {
-        "type": "boolean",
-        "description": "Compute neighbors on-the-fly (no pre-computed table)"
       }
     },
     "required": ["query"]
@@ -331,21 +334,23 @@ module Xerp::CLI
     puts "  help     Show this help"
     puts
     puts "Examples:"
-    puts "  xerp index                        # Index current directory"
-    puts "  xerp index --train                # Index and train vectors"
-    puts "  xerp query \"retry backoff\"        # Search for intent"
-    puts "  xerp query retry --vector none    # No expansion (exact match)"
-    puts "  xerp query retry --vector line    # Line model expansion only"
-    puts "  xerp query retry --raw            # Pure TF-IDF (no similarity weighting)"
-    puts "  xerp terms retry                  # All sources (default)"
-    puts "  xerp terms retry --salience line  # Line salience only"
-    puts "  xerp terms retry --salience block # Block salience only"
-    puts "  xerp terms retry --vector line    # Line vectors only"
-    puts "  xerp terms retry --vector none    # Salience only (no vectors)"
-    puts "  xerp terms retry --salience none  # Vectors only (no salience)"
-    puts "  xerp terms retry --vector centroid  # Centroid similarity"
-    puts "  xerp outline                      # Show code structure"
-    puts "  xerp outline --file 'src/*.cr'    # Filter by file pattern"
-    puts "  xerp mark abc123 --useful         # Mark result as useful"
+    puts "  xerp index                   # Index current directory"
+    puts "  xerp index --train           # Index and train vectors"
+    puts "  xerp query \"retry backoff\"   # Search with TF-IDF salience"
+    puts "  xerp query -e \"retry\"        # Expand query with similar terms"
+    puts "  xerp query -e -n \"retry\"     # Semantic search (expand, no salience)"
+    puts "  xerp query -l \"retry\"        # Line mode only"
+    puts "  xerp query -b \"retry\"        # Block mode only"
+    puts "  xerp query -n \"retry\"        # Raw matching (no salience)"
+    puts "  xerp terms retry             # Find related terms"
+    puts "  xerp outline                 # Show code structure"
+    puts "  xerp outline --file 'src/*'  # Filter by file pattern"
+    puts "  xerp mark abc123 --useful    # Mark result as useful"
+    puts
+    puts "Query flags:"
+    puts "  -l, --line        Line mode"
+    puts "  -b, --block       Block mode"
+    puts "  -e, --expand      Expand query with similar terms"
+    puts "  -n, --no-salience Disable TF-IDF weighting"
   end
 end

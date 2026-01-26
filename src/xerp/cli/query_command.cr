@@ -27,17 +27,30 @@ module Xerp::CLI
       json_output = result["json"]?.try(&.as_bool) || false
       jsonl_output = result["jsonl"]?.try(&.as_bool) || false
       grep_output = result["grep"]?.try(&.as_bool) || false
-      vector_arg = result["vector"]?.try(&.as_s) || "all"
-      raw_vectors = result["raw"]?.try(&.as_bool) || false
-      semantic = result["semantic"]?.try(&.as_bool) || false
-      on_the_fly = result["on-the-fly"]?.try(&.as_bool) || false
 
-      # Parse vector mode
-      vector_mode = parse_vector_mode(vector_arg)
-      unless vector_mode
-        STDERR.puts "Error: Invalid vector mode '#{vector_arg}'. Use: none, line, block, or all"
-        return 1
-      end
+      # New flag model
+      line_mode = result["line"]?.try(&.as_bool) || false
+      block_mode = result["block"]?.try(&.as_bool) || false
+      use_expand = result["expand"]?.try(&.as_bool) || false
+      no_salience = result["no-salience"]?.try(&.as_bool) || false
+
+      # Derive vector_mode from -l/-b flags
+      # Default: both line and block
+      vector_mode = if line_mode && block_mode
+                      Query::VectorMode::All
+                    elsif line_mode
+                      Query::VectorMode::Line
+                    elsif block_mode
+                      Query::VectorMode::Block
+                    else
+                      Query::VectorMode::All
+                    end
+
+      # If expand not enabled, set to None (no expansion)
+      vector_mode = Query::VectorMode::None unless use_expand
+
+      # Semantic mode: expand ON + salience OFF
+      semantic = use_expand && no_salience
 
       file_filter : Regex? = nil
       if pattern = result["file"]?.try(&.as_s)
@@ -70,9 +83,9 @@ module Xerp::CLI
           max_snippet_lines: max_block_lines,
           context_lines: context_lines,
           vector_mode: vector_mode,
-          raw_vectors: raw_vectors,
+          raw_vectors: no_salience,
           semantic: semantic,
-          on_the_fly: on_the_fly
+          on_the_fly: true  # Always on-the-fly now
         )
 
         response = engine.run(query_text, opts)
@@ -94,16 +107,6 @@ module Xerp::CLI
       rescue ex
         STDERR.puts "Error: #{ex.message}"
         1
-      end
-    end
-
-    private def self.parse_vector_mode(arg : String) : Query::VectorMode?
-      case arg.downcase
-      when "none"  then Query::VectorMode::None
-      when "line"  then Query::VectorMode::Line
-      when "block" then Query::VectorMode::Block
-      when "all"   then Query::VectorMode::All
-      else              nil
       end
     end
   end
