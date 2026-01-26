@@ -72,7 +72,7 @@ xerp query "QUERY" [OPTIONS]
 Mode flags:
   -l, --line           Line mode (textual proximity)
   -b, --block          Block mode (structural siblings)
-  -e, --expand         Expand query with similar terms (requires training)
+  -a, --augment        Augment query with similar terms (requires training)
   -n, --no-salience    Disable TF-IDF weighting (raw similarity)
 
 Output options:
@@ -94,8 +94,8 @@ Common patterns:
 xerp query "retry"           # default: both modes, TF-IDF salience
 xerp query -l "retry"        # line mode only
 xerp query -b "retry"        # block mode only
-xerp query -e "retry"        # expand with similar terms
-xerp query -e -n "retry"     # semantic search (expand, no salience)
+xerp query -a "retry"        # augment with similar terms
+xerp query -a -n "retry"     # semantic search (augment, no salience)
 ```
 
 ### Semantic vectors

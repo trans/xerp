@@ -31,7 +31,7 @@ module Xerp::CLI
       # New flag model
       line_mode = result["line"]?.try(&.as_bool) || false
       block_mode = result["block"]?.try(&.as_bool) || false
-      use_expand = result["expand"]?.try(&.as_bool) || false
+      use_augment = result["augment"]?.try(&.as_bool) || false
       no_salience = result["no-salience"]?.try(&.as_bool) || false
 
       # Derive vector_mode from -l/-b flags
@@ -47,10 +47,10 @@ module Xerp::CLI
                     end
 
       # If expand not enabled, set to None (no expansion)
-      vector_mode = Query::VectorMode::None unless use_expand
+      vector_mode = Query::VectorMode::None unless use_augment
 
       # Semantic mode: expand ON + salience OFF
-      semantic = use_expand && no_salience
+      semantic = use_augment && no_salience
 
       file_filter : Regex? = nil
       if pattern = result["file"]?.try(&.as_s)

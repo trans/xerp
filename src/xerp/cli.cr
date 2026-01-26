@@ -60,10 +60,10 @@ module Xerp::CLI
         "short": "b",
         "description": "Block mode only (unit + vectors)"
       },
-      "expand": {
+      "augment": {
         "type": "boolean",
-        "short": "e",
-        "description": "Expand query with similar terms"
+        "short": "a",
+        "description": "Augment query with similar terms"
       },
       "no-salience": {
         "type": "boolean",
@@ -367,8 +367,8 @@ module Xerp::CLI
     puts "  xerp index                   # Index current directory"
     puts "  xerp index --train           # Index and train vectors"
     puts "  xerp query \"retry backoff\"   # Search with TF-IDF salience"
-    puts "  xerp query -e \"retry\"        # Expand query with similar terms"
-    puts "  xerp query -e -n \"retry\"     # Semantic search (expand, no salience)"
+    puts "  xerp query -a \"retry\"        # Augment query with similar terms"
+    puts "  xerp query -a -n \"retry\"     # Semantic search (augment, no salience)"
     puts "  xerp query -l \"retry\"        # Line mode only"
     puts "  xerp query -b \"retry\"        # Block mode only"
     puts "  xerp query -n \"retry\"        # Raw matching (no salience)"
@@ -380,7 +380,7 @@ module Xerp::CLI
     puts "Query flags:"
     puts "  -l, --line        Line mode"
     puts "  -b, --block       Block mode"
-    puts "  -e, --expand      Expand query with similar terms"
+    puts "  -a, --augment     Augment query with similar terms"
     puts "  -n, --no-salience Disable TF-IDF weighting"
   end
 end
