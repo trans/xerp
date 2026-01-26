@@ -31,6 +31,11 @@ module Xerp::Vectors
     HASH_SEED        = 0x5DEECE66D_u64    # Fixed seed for reproducible hashing
     INT16_SCALE      = 32767.0            # Scale for int16 quantization
 
+    # Centroid salience configuration
+    DEFAULT_SALIENCE_PERCENT = 0.30  # Use top 30% of tokens by IDF
+    DEFAULT_SALIENCE_MIN     = 8     # Minimum tokens to use
+    DEFAULT_SALIENCE_MAX     = 64    # Maximum tokens to use
+
     # Gets model_id for a model name
     def self.model_id(model : String) : Int32
       MODEL_IDS[model]? || raise ArgumentError.new("Invalid model: #{model}")
@@ -858,7 +863,8 @@ module Xerp::Vectors
       result
     end
 
-    # Computes centroid for a leaf block from its tokens.
+    # Computes centroid for a leaf block from its top salient tokens.
+    # Uses top 30% of tokens by IDF (clamped to min 8, max 64).
     # centroid = Σ (token_vector × idf(token)) / Σ idf(token)
     private def self.compute_leaf_centroid(
       block_id : Int64,
@@ -866,16 +872,21 @@ module Xerp::Vectors
       token_vectors : Hash(Int64, Hash(Int64, Int64)),
       token_idfs : Hash(Int64, Float64)
     ) : Hash(Int64, Float64)
-      tokens = block_tokens[block_id]? || Set(Int64).new
-      return Hash(Int64, Float64).new if tokens.empty?
+      all_tokens = block_tokens[block_id]? || Set(Int64).new
+      return Hash(Int64, Float64).new if all_tokens.empty?
+
+      # Filter to tokens that have vectors
+      tokens_with_vecs = all_tokens.select { |tid| token_vectors[tid]? && !token_vectors[tid].empty? }
+      return Hash(Int64, Float64).new if tokens_with_vecs.empty?
+
+      # Select top salient tokens by IDF
+      salient_tokens = select_salient_tokens(tokens_with_vecs.to_a, token_idfs)
 
       centroid = Hash(Int64, Float64).new(0.0)
       total_idf = 0.0
 
-      tokens.each do |token_id|
-        token_vec = token_vectors[token_id]?
-        next unless token_vec && !token_vec.empty?
-
+      salient_tokens.each do |token_id|
+        token_vec = token_vectors[token_id]
         idf = token_idfs[token_id]? || 1.0
         total_idf += idf
 
@@ -890,6 +901,24 @@ module Xerp::Vectors
       end
 
       centroid
+    end
+
+    # Selects top salient tokens by IDF (30%, min 8, max 64).
+    private def self.select_salient_tokens(
+      tokens : Array(Int64),
+      token_idfs : Hash(Int64, Float64)
+    ) : Array(Int64)
+      return tokens if tokens.size <= DEFAULT_SALIENCE_MIN
+
+      # Calculate how many to take: 30% of total, clamped to [min, max]
+      target = (tokens.size * DEFAULT_SALIENCE_PERCENT).round.to_i
+      target = target.clamp(DEFAULT_SALIENCE_MIN, DEFAULT_SALIENCE_MAX)
+
+      # If we'd take all anyway, skip sorting
+      return tokens if target >= tokens.size
+
+      # Sort by IDF descending and take top N
+      tokens.sort_by { |tid| -(token_idfs[tid]? || 1.0) }.first(target)
     end
 
     # Computes centroid for a parent block as average of children's centroids.
