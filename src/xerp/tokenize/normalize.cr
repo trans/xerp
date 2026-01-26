@@ -48,6 +48,7 @@ module Xerp::Tokenize
   # For example: "getUserName" -> ["get", "User", "Name"]
   #              "user_name" -> ["user", "name"]
   # Returns the original token plus any split components.
+  # TODO: Not used anywhere yet - could be useful for tokenizing compound identifiers.
   def self.split_identifier(ident : String) : Array(String)
     result = [ident]
 
