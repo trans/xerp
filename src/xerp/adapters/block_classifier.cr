@@ -14,17 +14,6 @@ module Xerp::Adapters
     # Config key-value patterns
     CONFIG_PATTERNS = /^[\w\-_.]+\s*[:=]/
 
-    # Common programming keywords (fallback - ideally use learned keywords from corpus)
-    # TODO: Replace with keywords learned from `xerp keywords` command
-    CODE_KEYWORDS = Set{
-      "def", "end", "class", "module", "if", "else", "elsif", "unless",
-      "while", "for", "do", "return", "yield", "begin", "rescue", "ensure",
-      "case", "when", "require", "include", "extend", "private", "public",
-      "function", "const", "let", "var", "import", "export", "async", "await",
-      "fn", "pub", "mut", "impl", "struct", "enum", "trait", "use", "mod",
-      "func", "package", "type", "interface", "defer", "go", "chan",
-    }
-
     # Classifies a block based on its lines.
     def self.classify(lines : Array(String)) : BlockKind
       return BlockKind::Prose if lines.empty?
@@ -37,8 +26,8 @@ module Xerp::Adapters
       end
 
       # Check for config pattern (key: value or key=value lines)
-      # Config has moderate symbol density (colons, equals) but not as much as code
-      if stats[:config_ratio] > 0.5 && stats[:keyword_ratio] < 0.1
+      # Config has high config pattern ratio and low indentation variance
+      if stats[:config_ratio] > 0.5 && stats[:indent_variance] < 4.0
         return BlockKind::Config
       end
 
@@ -60,15 +49,13 @@ module Xerp::Adapters
       avg_line_length: Float64,
       indent_variance: Float64,
       camelcase_ratio: Float64,
-      short_line_ratio: Float64,
-      keyword_ratio: Float64
+      short_line_ratio: Float64
     )
       total_chars = 0
       total_symbols = 0
       comment_lines = 0
       config_lines = 0
       camelcase_count = 0
-      keyword_count = 0
       word_count = 0
       line_lengths = [] of Int32
       indents = [] of Int32
@@ -107,12 +94,8 @@ module Xerp::Adapters
           camelcase_count += 1
         end
 
-        # Check for code keywords
-        words = stripped.split(/[\s\(\)\{\}\[\]:;,]+/)
-        words.each do |word|
-          word_count += 1
-          keyword_count += 1 if CODE_KEYWORDS.includes?(word.downcase)
-        end
+        # Count words for camelCase ratio
+        word_count += stripped.split(/\s+/).size
       end
 
       non_empty = lines.count { |l| !l.strip.empty? }
@@ -134,29 +117,28 @@ module Xerp::Adapters
         avg_line_length: line_lengths.empty? ? 0.0 : line_lengths.sum.to_f64 / line_lengths.size,
         indent_variance: indent_variance,
         camelcase_ratio: word_count > 0 ? camelcase_count.to_f64 / word_count : 0.0,
-        short_line_ratio: line_lengths.empty? ? 0.0 : short_lines.to_f64 / line_lengths.size,
-        keyword_ratio: word_count > 0 ? keyword_count.to_f64 / word_count : 0.0
+        short_line_ratio: line_lengths.empty? ? 0.0 : short_lines.to_f64 / line_lengths.size
       }
     end
 
     # Computes a code score from 0.0 (prose) to 1.0 (code).
-    # Starts with most reliable heuristics.
+    # Uses structural heuristics (keywords handled by adapter).
     private def self.compute_code_score(stats : NamedTuple) : Float64
       score = 0.0
 
-      # 1. Keywords (most reliable) - def, class, if, return, etc.
-      # Even one keyword is a strong signal
-      score += (stats[:keyword_ratio] * 4.0).clamp(0.0, 0.35)
+      # 1. Symbol density - brackets, parens, operators (most reliable)
+      # Code typically 0.08-0.15, prose 0.02-0.05
+      score += (stats[:symbol_density] * 3.0).clamp(0.0, 0.35)
 
       # 2. Indentation variance - code has nested structure
       # Prose is typically flat or paragraph-indented uniformly
-      score += (stats[:indent_variance] / 20.0).clamp(0.0, 0.25)
+      score += (stats[:indent_variance] / 15.0).clamp(0.0, 0.30)
 
-      # 3. Symbol density - brackets, parens, operators
-      score += (stats[:symbol_density] * 2.5).clamp(0.0, 0.25)
+      # 3. CamelCase/PascalCase identifiers
+      score += (stats[:camelcase_ratio] * 5.0).clamp(0.0, 0.20)
 
-      # 4. CamelCase/snake_case identifiers
-      score += (stats[:camelcase_ratio] * 5.0).clamp(0.0, 0.15)
+      # 4. Short lines - code has more short lines
+      score += (stats[:short_line_ratio] * 0.2).clamp(0.0, 0.15)
 
       # 5. Prose signals (negative)
       # Long lines suggest prose
