@@ -43,20 +43,24 @@ module Xerp::Query::Expansion
   # Returns identity expansion plus nearest neighbors from trained vectors.
   # Uses union+rerank blending when both models are trained.
   # When raw_vectors=true, returns pure similarity scores without IDF weighting.
+  # When on_the_fly=true, computes neighbors from co-occurrence matrix instead of
+  # using pre-computed token_neighbors table.
   def self.expand(db : DB::Database, query_tokens : Array(String),
                   top_k : Int32 = DEFAULT_TOP_K_PER_TOKEN,
                   min_similarity : Float64 = DEFAULT_MIN_SIMILARITY,
                   weights : BlendWeights = BlendWeights.new,
                   max_df_percent : Float64 = DEFAULT_MAX_DF_PERCENT,
                   vector_mode : VectorMode = VectorMode::All,
-                  raw_vectors : Bool = false) : Hash(String, Array(ExpandedToken))
+                  raw_vectors : Bool = false,
+                  on_the_fly : Bool = false) : Hash(String, Array(ExpandedToken))
     result = Hash(String, Array(ExpandedToken)).new
 
     # Check which models are available and requested
     use_line = vector_mode.line? || vector_mode.all?
     use_block = vector_mode.block? || vector_mode.all?
-    has_line = use_line && model_trained?(db, Vectors::Cooccurrence::MODEL_LINE)
-    has_block = use_block && model_trained?(db, Vectors::Cooccurrence::MODEL_SCOPE)
+    # For on-the-fly, check co-occurrence data; otherwise check pre-computed neighbors
+    has_line = use_line && (on_the_fly ? model_has_cooccurrence?(db, Vectors::Cooccurrence::MODEL_LINE) : model_trained?(db, Vectors::Cooccurrence::MODEL_LINE))
+    has_block = use_block && (on_the_fly ? model_has_cooccurrence?(db, Vectors::Cooccurrence::MODEL_SCOPE) : model_trained?(db, Vectors::Cooccurrence::MODEL_SCOPE))
     has_vectors = has_line || has_block
 
     query_tokens.each do |token|
@@ -79,7 +83,7 @@ module Xerp::Query::Expansion
         # Add semantic neighbors from requested models
         if has_vectors
           neighbors = get_neighbors(db, token_row.id, top_k, min_similarity,
-                                    weights, max_df_percent, has_line, has_block)
+                                    weights, max_df_percent, has_line, has_block, on_the_fly)
           neighbors.each do |neighbor|
             expansions << ExpandedToken.new(
               original: token,
@@ -108,7 +112,7 @@ module Xerp::Query::Expansion
             # Add semantic neighbors for lowercase match
             if has_vectors
               neighbors = get_neighbors(db, lower_row.id, top_k, min_similarity,
-                                        weights, max_df_percent, has_line, has_block)
+                                        weights, max_df_percent, has_line, has_block, on_the_fly)
               neighbors.each do |neighbor|
                 # Adjust score to account for case mismatch penalty
                 expansions << ExpandedToken.new(
@@ -142,21 +146,30 @@ module Xerp::Query::Expansion
     result
   end
 
-  # Checks if a specific model has been trained.
+  # Checks if a specific model has pre-computed neighbors.
   def self.model_trained?(db : DB::Database, model : String) : Bool
     mid = Vectors::Cooccurrence.model_id(model)
     count = db.scalar("SELECT COUNT(*) FROM token_neighbors WHERE model_id = ?", mid).as(Int64)
     count > 0
   end
 
+  # Checks if a specific model has co-occurrence data (for on-the-fly computation).
+  def self.model_has_cooccurrence?(db : DB::Database, model : String) : Bool
+    mid = Vectors::Cooccurrence.model_id(model)
+    count = db.scalar("SELECT COUNT(*) FROM token_cooccurrence WHERE model_id = ? LIMIT 1", mid).as(Int64)
+    count > 0
+  end
+
   # Gets neighbors from trained models with scoring.
   # Reranks with: score = w1*similarity + w2*idf + w3*feedback_boost
+  # When on_the_fly=true, computes neighbors from co-occurrence matrix.
   def self.get_neighbors(db : DB::Database, token_id : Int64,
                          top_k : Int32, min_similarity : Float64,
                          weights : BlendWeights,
                          max_df_percent : Float64 = DEFAULT_MAX_DF_PERCENT,
                          use_line : Bool = true,
-                         use_block : Bool = false) : Array(NamedTuple(token: String, token_id: Int64, score: Float64, kind: Tokenize::TokenKind))
+                         use_block : Bool = false,
+                         on_the_fly : Bool = false) : Array(NamedTuple(token: String, token_id: Int64, score: Float64, kind: Tokenize::TokenKind))
     # Fetch more candidates than we need for better reranking
     fetch_limit = top_k * 2
 
@@ -165,7 +178,7 @@ module Xerp::Query::Expansion
 
     if use_line
       line_candidates = get_neighbors_for_model(db, token_id, Vectors::Cooccurrence::MODEL_LINE,
-                                                fetch_limit, min_similarity)
+                                                fetch_limit, min_similarity, on_the_fly)
       line_candidates.each do |c|
         # Keep best similarity if seen from multiple models
         if existing = candidates_by_id[c[:token_id]]?
@@ -178,7 +191,7 @@ module Xerp::Query::Expansion
 
     if use_block
       block_candidates = get_neighbors_for_model(db, token_id, Vectors::Cooccurrence::MODEL_SCOPE,
-                                                 fetch_limit, min_similarity)
+                                                 fetch_limit, min_similarity, on_the_fly)
       block_candidates.each do |c|
         if existing = candidates_by_id[c[:token_id]]?
           candidates_by_id[c[:token_id]] = c if c[:similarity] > existing[:similarity]
@@ -227,43 +240,70 @@ module Xerp::Query::Expansion
   end
 
   # Gets nearest neighbors for a token from a specific model.
+  # When on_the_fly=true, computes neighbors from co-occurrence matrix instead of
+  # using pre-computed token_neighbors table.
   private def self.get_neighbors_for_model(db : DB::Database, token_id : Int64, model : String,
-                                           limit : Int32, min_similarity : Float64) : Array(NamedTuple(token: String, token_id: Int64, similarity: Float64, kind: Tokenize::TokenKind, df: Int32))
+                                           limit : Int32, min_similarity : Float64,
+                                           on_the_fly : Bool = false) : Array(NamedTuple(token: String, token_id: Int64, similarity: Float64, kind: Tokenize::TokenKind, df: Int32))
     neighbors = [] of NamedTuple(token: String, token_id: Int64, similarity: Float64, kind: Tokenize::TokenKind, df: Int32)
-    mid = Vectors::Cooccurrence.model_id(model)
 
-    # Convert min_similarity to quantized form for comparison
-    min_sim_quantized = Vectors::Cooccurrence.quantize_similarity(min_similarity)
+    if on_the_fly
+      # Compute neighbors on-the-fly from co-occurrence matrix
+      raw_neighbors = Vectors::Cooccurrence.compute_neighbors_on_fly(db, token_id, model, limit, min_similarity)
 
-    db.query(<<-SQL, mid, token_id, min_sim_quantized, limit) do |rs|
-      SELECT t.token, t.token_id, t.kind, t.df, n.similarity
-      FROM token_neighbors n
-      JOIN tokens t ON t.token_id = n.neighbor_id
-      WHERE n.model_id = ?
-        AND n.token_id = ?
-        AND n.similarity >= ?
-        AND t.kind IN ('ident', 'word', 'compound')
-      ORDER BY n.similarity DESC
-      LIMIT ?
-    SQL
-      rs.each do
-        token = rs.read(String)
-        neighbor_id = rs.read(Int64)
-        kind_str = rs.read(String)
-        df = rs.read(Int32)
-        similarity_quantized = rs.read(Int32)
-        kind = Tokenize.kind_from_s(kind_str)
+      # Enrich with token info
+      raw_neighbors.each do |(neighbor_id, similarity)|
+        token_row = Store::Statements.select_token_by_id(db, neighbor_id)
+        next unless token_row
 
-        # Dequantize similarity back to 0.0-1.0 range
-        similarity = Vectors::Cooccurrence.dequantize_similarity(similarity_quantized)
+        kind = Tokenize.kind_from_s(token_row.kind)
+        next unless KIND_ALLOWLIST.includes?(kind)
 
         neighbors << {
-          token:      token,
+          token:      token_row.token,
           token_id:   neighbor_id,
           similarity: similarity,
           kind:       kind,
-          df:         df,
+          df:         token_row.df,
         }
+      end
+    else
+      # Use pre-computed neighbors from token_neighbors table
+      mid = Vectors::Cooccurrence.model_id(model)
+
+      # Convert min_similarity to quantized form for comparison
+      min_sim_quantized = Vectors::Cooccurrence.quantize_similarity(min_similarity)
+
+      db.query(<<-SQL, mid, token_id, min_sim_quantized, limit) do |rs|
+        SELECT t.token, t.token_id, t.kind, t.df, n.similarity
+        FROM token_neighbors n
+        JOIN tokens t ON t.token_id = n.neighbor_id
+        WHERE n.model_id = ?
+          AND n.token_id = ?
+          AND n.similarity >= ?
+          AND t.kind IN ('ident', 'word', 'compound')
+        ORDER BY n.similarity DESC
+        LIMIT ?
+      SQL
+        rs.each do
+          token = rs.read(String)
+          neighbor_id = rs.read(Int64)
+          kind_str = rs.read(String)
+          df = rs.read(Int32)
+          similarity_quantized = rs.read(Int32)
+          kind = Tokenize.kind_from_s(kind_str)
+
+          # Dequantize similarity back to 0.0-1.0 range
+          similarity = Vectors::Cooccurrence.dequantize_similarity(similarity_quantized)
+
+          neighbors << {
+            token:      token,
+            token_id:   neighbor_id,
+            similarity: similarity,
+            kind:       kind,
+            df:         df,
+          }
+        end
       end
     end
 

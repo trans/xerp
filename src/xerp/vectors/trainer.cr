@@ -60,8 +60,9 @@ module Xerp::Vectors
           # Build co-occurrence counts for this model
           pairs_stored = Cooccurrence.build_counts(db, m, window_size)
 
-          # Compute nearest neighbors for this model
-          neighbors_computed = Cooccurrence.compute_neighbors(db, m, min_count, top_neighbors)
+          # Skip pre-computed neighbors - using on-the-fly computation instead
+          # neighbors_computed = Cooccurrence.compute_neighbors(db, m, min_count, top_neighbors)
+          neighbors_computed = 0_i64
 
           # Compute hierarchical block centroids for this model
           centroids_computed = Cooccurrence.compute_block_centroids(db, m)
@@ -95,12 +96,14 @@ module Xerp::Vectors
           db.exec("DELETE FROM token_neighbors WHERE model_id = ?", mid)
           db.exec("DELETE FROM token_vector_norms WHERE model_id = ?", mid)
           db.exec("DELETE FROM block_centroids WHERE model_id = ?", mid)
+          db.exec("DELETE FROM block_centroid_dense WHERE model_id = ?", mid)
           db.exec("DELETE FROM meta WHERE key LIKE ?", "tokenvec.#{model}.%")
         else
           db.exec("DELETE FROM token_cooccurrence")
           db.exec("DELETE FROM token_neighbors")
           db.exec("DELETE FROM token_vector_norms")
           db.exec("DELETE FROM block_centroids")
+          db.exec("DELETE FROM block_centroid_dense")
           db.exec("DELETE FROM block_sig_tokens")
           db.exec("DELETE FROM meta WHERE key LIKE 'tokenvec.%'")
         end
@@ -114,9 +117,10 @@ module Xerp::Vectors
       result = false
       @database.with_migrated_connection do |db|
         if model
-          count = db.scalar("SELECT COUNT(*) FROM token_neighbors WHERE model = ?", model).as(Int64)
+          mid = Cooccurrence.model_id(model)
+          count = db.scalar("SELECT COUNT(*) FROM token_cooccurrence WHERE model_id = ? LIMIT 1", mid).as(Int64)
         else
-          count = db.scalar("SELECT COUNT(*) FROM token_neighbors").as(Int64)
+          count = db.scalar("SELECT COUNT(*) FROM token_cooccurrence LIMIT 1").as(Int64)
         end
         result = count > 0
       end

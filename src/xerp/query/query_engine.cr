@@ -73,7 +73,7 @@ module Xerp::Query
           results = build_centroid_results(db, centroid_scores, query_tokens.to_a, opts)
         else
           # Standard mode: token-based scoring with expansion
-          expanded = Expansion.expand(db, query_tokens, vector_mode: opts.vector_mode)
+          expanded = Expansion.expand(db, query_tokens, vector_mode: opts.vector_mode, on_the_fly: opts.on_the_fly)
 
           # Score scopes using DESIGN02-00 algorithm
           scope_scores = ScopeScorer.score_scopes(db, expanded, opts)

@@ -4,7 +4,7 @@ require "../vectors/cooccurrence"
 module Xerp::Query
   # Scores blocks by centroid similarity - compares query centroid to block centroids.
   module CentroidScorer
-    # Scores blocks by comparing query centroid to pre-computed block centroids.
+    # Scores blocks by comparing query centroid to pre-computed dense block centroids.
     # Returns Array of {block_id, similarity} sorted by similarity descending.
     def self.score_blocks(db : DB::Database,
                           query_tokens : Array(String),
@@ -23,26 +23,24 @@ module Xerp::Query
       end
       return [] of {Int64, Float64} if query_token_ids.empty?
 
-      # Load query token vectors
+      # Load query token vectors and project to dense
       query_vectors = load_token_vectors(db, query_token_ids, model_id)
       return [] of {Int64, Float64} if query_vectors.empty?
 
-      # Build query centroid
-      query_centroid = build_query_centroid(query_vectors)
-      return [] of {Int64, Float64} if query_centroid.empty?
+      # Build query centroid in sparse form, then project to dense
+      sparse_centroid = build_query_centroid(query_vectors)
+      return [] of {Int64, Float64} if sparse_centroid.empty?
 
-      # Compute query centroid norm
-      query_norm = Math.sqrt(query_centroid.values.sum { |v| v * v })
-      return [] of {Int64, Float64} if query_norm == 0.0
+      query_dense = Vectors::Cooccurrence.project_to_dense(sparse_centroid)
+      query_dense = Vectors::Cooccurrence.normalize_vector(query_dense)
 
-      # Find similar blocks via dot product accumulation
-      block_scores = compute_block_similarities(db, model_id, query_centroid, query_norm)
+      # Score all blocks with dense vectors
+      block_scores = compute_dense_similarities(db, model_id, query_dense)
 
       # Sort by similarity
       sorted = block_scores.to_a.sort_by { |(_, sim)| -sim }
 
       # Deduplicate ancestor-descendant pairs before taking top K
-      # (so we don't lose results to deduplication)
       deduped = deduplicate_ancestry(db, sorted)
 
       deduped.first(top_k)
@@ -168,71 +166,30 @@ module Xerp::Query
       centroid
     end
 
-    # Computes cosine similarity between query centroid and all block centroids.
-    # Uses inverted lookup on context_id for efficiency.
-    private def self.compute_block_similarities(db : DB::Database,
+    # Computes cosine similarity between query dense vector and all block dense vectors.
+    private def self.compute_dense_similarities(db : DB::Database,
                                                 model_id : Int32,
-                                                query_centroid : Hash(Int64, Float64),
-                                                query_norm : Float64) : Hash(Int64, Float64)
-      # Accumulate dot products per block
-      dot_products = Hash(Int64, Float64).new(0.0)
+                                                query_dense : Array(Float64)) : Hash(Int64, Float64)
+      similarities = Hash(Int64, Float64).new
 
-      # Query blocks that share contexts with query centroid
-      context_ids_str = query_centroid.keys.join(",")
-      return dot_products if context_ids_str.empty?
-
-      db.query(<<-SQL, model_id) do |rs|
-        SELECT block_id, context_id, weight
-        FROM block_centroids
-        WHERE model_id = ? AND context_id IN (#{context_ids_str})
-      SQL
+      # Load all block dense vectors for this model
+      db.query("SELECT block_id, vector FROM block_centroid_dense WHERE model_id = ?", model_id) do |rs|
         rs.each do
           block_id = rs.read(Int64)
-          context_id = rs.read(Int64)
-          weight = rs.read(Float64)
+          blob = rs.read(Bytes)
+          block_dense = Vectors::Cooccurrence.dequantize_blob(blob)
 
-          query_weight = query_centroid[context_id]? || 0.0
-          dot_products[block_id] += query_weight * weight
+          # Compute dot product (both vectors are unit length)
+          sim = 0.0
+          Vectors::Cooccurrence::DENSE_DIMS.times do |i|
+            sim += query_dense[i] * block_dense[i]
+          end
+
+          similarities[block_id] = sim if sim > 0.0
         end
-      end
-
-      # Load block centroid norms
-      block_norms = load_block_norms(db, model_id, dot_products.keys)
-
-      # Convert to cosine similarities
-      similarities = Hash(Int64, Float64).new
-      dot_products.each do |block_id, dot|
-        block_norm = block_norms[block_id]? || 0.0
-        next if block_norm == 0.0
-        similarities[block_id] = dot / (query_norm * block_norm)
       end
 
       similarities
-    end
-
-    # Loads centroid norms for blocks.
-    private def self.load_block_norms(db : DB::Database,
-                                      model_id : Int32,
-                                      block_ids : Array(Int64)) : Hash(Int64, Float64)
-      norms = Hash(Int64, Float64).new
-
-      return norms if block_ids.empty?
-
-      ids_str = block_ids.join(",")
-      db.query(<<-SQL, model_id) do |rs|
-        SELECT block_id, SUM(weight * weight) as norm_sq
-        FROM block_centroids
-        WHERE model_id = ? AND block_id IN (#{ids_str})
-        GROUP BY block_id
-      SQL
-        rs.each do
-          block_id = rs.read(Int64)
-          norm_sq = rs.read(Float64)
-          norms[block_id] = Math.sqrt(norm_sq)
-        end
-      end
-
-      norms
     end
   end
 end

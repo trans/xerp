@@ -30,6 +30,7 @@ module Xerp::CLI
       vector_arg = result["vector"]?.try(&.as_s) || "all"
       raw_vectors = result["raw"]?.try(&.as_bool) || false
       semantic = result["semantic"]?.try(&.as_bool) || false
+      on_the_fly = result["on-the-fly"]?.try(&.as_bool) || false
 
       # Parse vector mode
       vector_mode = parse_vector_mode(vector_arg)
@@ -70,7 +71,8 @@ module Xerp::CLI
           context_lines: context_lines,
           vector_mode: vector_mode,
           raw_vectors: raw_vectors,
-          semantic: semantic
+          semantic: semantic,
+          on_the_fly: on_the_fly
         )
 
         response = engine.run(query_text, opts)

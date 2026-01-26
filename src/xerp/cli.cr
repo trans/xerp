@@ -108,6 +108,10 @@ module Xerp::CLI
       "semantic": {
         "type": "boolean",
         "description": "Search by block centroid similarity (semantic search)"
+      },
+      "on-the-fly": {
+        "type": "boolean",
+        "description": "Compute neighbors on-the-fly (no pre-computed table)"
       }
     },
     "required": ["query"]

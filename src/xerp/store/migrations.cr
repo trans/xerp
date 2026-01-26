@@ -427,6 +427,16 @@ module Xerp::Store
         CREATE INDEX idx_block_centroids_model_context
         ON block_centroids(model_id, context_id)
       SQL
+
+      # Dense block centroid vectors (256 dims × int16 = 512 bytes)
+      db.exec <<-SQL
+        CREATE TABLE IF NOT EXISTS block_centroid_dense (
+          block_id   INTEGER NOT NULL REFERENCES blocks(block_id) ON DELETE CASCADE,
+          model_id   INTEGER NOT NULL REFERENCES models(model_id),
+          vector     BLOB NOT NULL,
+          PRIMARY KEY (block_id, model_id)
+        )
+      SQL
     end
   end
 end
