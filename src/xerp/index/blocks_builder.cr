@@ -15,10 +15,11 @@ module Xerp::Index
     # Builds blocks from adapter result and stores them in the database.
     # Returns an array of database block_ids corresponding to the adapter blocks.
     def self.build(db : DB::Database, file_id : Int64,
-                   result : Adapters::AdapterResult) : Array(Int64)
+                   result : Adapters::AdapterResult,
+                   lines : Array(String) = [] of String) : Array(Int64)
       block_ids = [] of Int64
 
-      # First pass: insert all blocks and cache their start lines
+      # First pass: insert all blocks and cache ancestry header lines
       result.blocks.each do |block|
         block_id = Store::Statements.insert_block(
           db,
@@ -31,9 +32,15 @@ module Xerp::Index
         )
         block_ids << block_id
 
-        # Cache the block's start line text in line_cache
-        if header = block.header_text
-          Store::Statements.upsert_line_cache(db, file_id, block.line_start, header)
+        # Cache the line BEFORE this block starts (for ancestry display).
+        # This is the "header" from this block's perspective - e.g., "module Foo"
+        # rather than the first line of a merged parent block.
+        if block.line_start > 1 && block.parent_index
+          prev_line_idx = block.line_start - 2  # 0-indexed
+          if prev_line_idx >= 0 && prev_line_idx < lines.size
+            prev_text = lines[prev_line_idx]
+            Store::Statements.upsert_line_cache(db, file_id, block.line_start - 1, prev_text)
+          end
         end
       end
 

@@ -304,6 +304,17 @@ module Xerp::Store
       db.query_one?("SELECT text FROM line_cache WHERE file_id = ? AND line_num = ?", file_id, line_num, as: String)
     end
 
+    # Finds the nearest cached line at or before the given line number, within a range.
+    # Returns {line_num, text} or nil if none found.
+    def self.select_nearest_line_before(db : DB::Database, file_id : Int64,
+                                        target_line : Int32, min_line : Int32) : {Int32, String}?
+      db.query_one?(<<-SQL, file_id, target_line, min_line, as: {Int32, String})
+        SELECT line_num, text FROM line_cache
+        WHERE file_id = ? AND line_num <= ? AND line_num >= ?
+        ORDER BY line_num DESC LIMIT 1
+      SQL
+    end
+
     def self.delete_lines_by_file(db : DB::Database, file_id : Int64) : Nil
       db.exec("DELETE FROM line_cache WHERE file_id = ?", file_id)
     end
