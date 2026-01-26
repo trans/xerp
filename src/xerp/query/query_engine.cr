@@ -251,8 +251,8 @@ module Xerp::Query
         next unless file_row
 
         # For centroid search, we don't have specific hit lines
-        # Use block start as reference
-        hit_lines = [block_row.line_start]
+        # Use the block's full range so snippet shows block content
+        hit_lines = (block_row.line_start..block_row.line_end).to_a
 
         # Extract snippet
         snippet_result = Snippet.extract_with_error(
