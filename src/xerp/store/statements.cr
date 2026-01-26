@@ -324,6 +324,40 @@ module Xerp::Store
       {block, header}
     end
 
+    # --- Block Centroids ---
+
+    def self.upsert_block_centroid(db : DB::Database, block_id : Int64, model_id : Int32,
+                                   context_id : Int64, weight : Float64) : Nil
+      db.exec(<<-SQL, block_id, model_id, context_id, weight, weight)
+        INSERT INTO block_centroids (block_id, model_id, context_id, weight)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT (block_id, model_id, context_id)
+        DO UPDATE SET weight = ?
+      SQL
+    end
+
+    def self.delete_block_centroids_by_file(db : DB::Database, file_id : Int64) : Nil
+      db.exec(<<-SQL, file_id)
+        DELETE FROM block_centroids
+        WHERE block_id IN (SELECT block_id FROM blocks WHERE file_id = ?)
+      SQL
+    end
+
+    def self.delete_block_centroids_by_model(db : DB::Database, model_id : Int32) : Nil
+      db.exec("DELETE FROM block_centroids WHERE model_id = ?", model_id)
+    end
+
+    def self.select_block_centroid(db : DB::Database, block_id : Int64, model_id : Int32) : Hash(Int64, Float64)
+      result = Hash(Int64, Float64).new
+      db.query("SELECT context_id, weight FROM block_centroids WHERE block_id = ? AND model_id = ?",
+               block_id, model_id) do |rs|
+        rs.each do
+          result[rs.read(Int64)] = rs.read(Float64)
+        end
+      end
+      result
+    end
+
     # --- Utility ---
 
     def self.file_count(db : DB::Database) : Int64

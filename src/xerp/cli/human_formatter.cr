@@ -185,6 +185,9 @@ module Xerp::CLI::HumanFormatter
       result << "  neighbors computed:  "
       result << line_stats.neighbors_computed
       result << "\n"
+      result << "  block centroids:     "
+      result << line_stats.centroids_computed
+      result << "\n"
       result << "  time:                "
       result << line_stats.elapsed_ms
       result << "ms\n\n"
@@ -197,6 +200,9 @@ module Xerp::CLI::HumanFormatter
       result << "\n"
       result << "  neighbors computed:  "
       result << scope_stats.neighbors_computed
+      result << "\n"
+      result << "  block centroids:     "
+      result << scope_stats.centroids_computed
       result << "\n"
       result << "  time:                "
       result << scope_stats.elapsed_ms

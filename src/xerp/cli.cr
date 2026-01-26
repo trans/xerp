@@ -104,6 +104,10 @@ module Xerp::CLI
       "raw": {
         "type": "boolean",
         "description": "Raw TF-IDF scoring (ignore vector similarity weights)"
+      },
+      "semantic": {
+        "type": "boolean",
+        "description": "Search by block centroid similarity (semantic search)"
       }
     },
     "required": ["query"]

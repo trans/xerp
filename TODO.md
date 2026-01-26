@@ -46,16 +46,11 @@ Current coverage (line/block × salience/vector/centroid):
 
 - [x] **Line salience**: query-time term extraction from matching lines (more granular than block)
 - [x] **Block centroid**: `--vector centroid` computes query centroid, finds tokens with similar vectors
-- [ ] **Hierarchical block centroids**: current centroid is query-time average of query tokens
+- [x] **Hierarchical block centroids**: pre-computed during training, queryable via `--semantic`
   - Leaf blocks: centroid from header + body tokens (IDF-weighted)
-  - Parent blocks: average of children's centroids (maybe blend with header)
-  - Pre-compute and store during training
-  - Use IDF weighting when computing centroids:
-    ```
-    centroid = Σ (token_vector * idf(token)) / Σ idf(token)
-    ```
-  - Keep raw co-occurrence vectors pure (no TF-IDF baked in)
-  - Enables semantic block search without exact token matches
+  - Parent blocks: average of children's centroids
+  - Stored in `block_centroids` table
+  - Query via `./xerp query "..." --semantic` for centroid-based block search
 
 ## Block Structure Issues
 

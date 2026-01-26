@@ -29,6 +29,7 @@ module Xerp::CLI
       grep_output = result["grep"]?.try(&.as_bool) || false
       vector_arg = result["vector"]?.try(&.as_s) || "all"
       raw_vectors = result["raw"]?.try(&.as_bool) || false
+      semantic = result["semantic"]?.try(&.as_bool) || false
 
       # Parse vector mode
       vector_mode = parse_vector_mode(vector_arg)
@@ -68,7 +69,8 @@ module Xerp::CLI
           max_snippet_lines: max_block_lines,
           context_lines: context_lines,
           vector_mode: vector_mode,
-          raw_vectors: raw_vectors
+          raw_vectors: raw_vectors,
+          semantic: semantic
         )
 
         response = engine.run(query_text, opts)

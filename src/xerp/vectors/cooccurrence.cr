@@ -82,7 +82,7 @@ module Xerp::Vectors
     private def self.build_file_counts(db : DB::Database, file_id : Int64,
                                        model : String, window_size : Int32) : Int64
       # Get blocks for this file (sorted by start_line)
-      blocks = get_file_blocks_with_parents(db, file_id)
+      blocks = get_file_blocks(db, file_id)
 
       # Get postings for this file with line numbers
       postings = get_file_postings(db, file_id)
@@ -579,7 +579,7 @@ module Xerp::Vectors
       end
     end
 
-    private def self.get_file_blocks_with_parents(db : DB::Database, file_id : Int64) : Array(FileBlockWithParent)
+    private def self.get_file_blocks(db : DB::Database, file_id : Int64) : Array(FileBlockWithParent)
       blocks = [] of FileBlockWithParent
 
       db.query(<<-SQL, file_id) do |rs|
@@ -619,6 +619,212 @@ module Xerp::Vectors
       end
 
       postings
+    end
+
+    # --- Block Centroids ---
+
+    # Computes hierarchical block centroids for a model.
+    # Leaf blocks: IDF-weighted average of token vectors
+    # Parent blocks: average of children's centroids
+    def self.compute_block_centroids(db : DB::Database, model : String) : Int64
+      mid = model_id(model)
+      total_files = Store::Statements.file_count(db).to_f64
+      return 0_i64 if total_files == 0
+
+      # Clear existing centroids for this model
+      Store::Statements.delete_block_centroids_by_model(db, mid)
+
+      # Load all token vectors for this model (context_id -> count per token)
+      token_vectors = load_all_token_vectors(db, model)
+      return 0_i64 if token_vectors.empty?
+
+      # Load IDF for all tokens
+      token_idfs = load_token_idfs(db, total_files)
+
+      centroids_computed = 0_i64
+      files = Store::Statements.all_files(db)
+
+      files.each do |file|
+        centroids_computed += compute_file_block_centroids(
+          db, mid, file.id, token_vectors, token_idfs, total_files
+        )
+      end
+
+      centroids_computed
+    end
+
+    # Computes block centroids for a single file (bottom-up).
+    private def self.compute_file_block_centroids(
+      db : DB::Database,
+      model_id : Int32,
+      file_id : Int64,
+      token_vectors : Hash(Int64, Hash(Int64, Int64)),
+      token_idfs : Hash(Int64, Float64),
+      total_files : Float64
+    ) : Int64
+      blocks = get_file_blocks(db, file_id)
+      return 0_i64 if blocks.empty?
+
+      postings = get_file_postings(db, file_id)
+      return 0_i64 if postings.empty?
+
+      # Build map: block_id -> tokens in that block
+      block_tokens = build_block_tokens_map(blocks, postings)
+
+      # Build map: parent_id -> children
+      children_by_parent = Hash(Int64?, Array(Int64)).new { |h, k| h[k] = [] of Int64 }
+      blocks.each { |b| children_by_parent[b.parent_block_id] << b.block_id }
+
+      # Find leaf blocks (those with no children)
+      leaf_block_ids = blocks.map(&.block_id).reject { |bid| children_by_parent.has_key?(bid) }.to_set
+
+      # Sort blocks by level descending (deepest first for bottom-up)
+      sorted_blocks = blocks.sort_by { |b| -b.level }
+
+      # Store computed centroids (block_id -> centroid vector)
+      computed_centroids = Hash(Int64, Hash(Int64, Float64)).new
+
+      # Process bottom-up
+      sorted_blocks.each do |block|
+        centroid = if leaf_block_ids.includes?(block.block_id)
+          # Leaf block: compute from tokens
+          compute_leaf_centroid(block.block_id, block_tokens, token_vectors, token_idfs)
+        else
+          # Parent block: average of children's centroids
+          children = children_by_parent[block.block_id]? || [] of Int64
+          compute_parent_centroid(children, computed_centroids)
+        end
+
+        next if centroid.empty?
+
+        computed_centroids[block.block_id] = centroid
+
+        # Store in database
+        centroid.each do |context_id, weight|
+          Store::Statements.upsert_block_centroid(db, block.block_id, model_id, context_id, weight)
+        end
+      end
+
+      computed_centroids.size.to_i64
+    end
+
+    # Builds a map from block_id to the set of token_ids that appear in that block.
+    private def self.build_block_tokens_map(
+      blocks : Array(FileBlockWithParent),
+      postings : Array(FilePosting)
+    ) : Hash(Int64, Set(Int64))
+      result = Hash(Int64, Set(Int64)).new { |h, k| h[k] = Set(Int64).new }
+
+      # Build block ranges
+      block_ranges = blocks.map { |b| {b.block_id, b.start_line, b.end_line} }
+
+      # For each posting, find which blocks it belongs to
+      postings.each do |posting|
+        posting.lines.each do |line_num|
+          block_ranges.each do |(block_id, start_line, end_line)|
+            if line_num >= start_line && line_num <= end_line
+              result[block_id] << posting.token_id
+            end
+          end
+        end
+      end
+
+      result
+    end
+
+    # Computes centroid for a leaf block from its tokens.
+    # centroid = Σ (token_vector × idf(token)) / Σ idf(token)
+    private def self.compute_leaf_centroid(
+      block_id : Int64,
+      block_tokens : Hash(Int64, Set(Int64)),
+      token_vectors : Hash(Int64, Hash(Int64, Int64)),
+      token_idfs : Hash(Int64, Float64)
+    ) : Hash(Int64, Float64)
+      tokens = block_tokens[block_id]? || Set(Int64).new
+      return Hash(Int64, Float64).new if tokens.empty?
+
+      centroid = Hash(Int64, Float64).new(0.0)
+      total_idf = 0.0
+
+      tokens.each do |token_id|
+        token_vec = token_vectors[token_id]?
+        next unless token_vec && !token_vec.empty?
+
+        idf = token_idfs[token_id]? || 1.0
+        total_idf += idf
+
+        token_vec.each do |context_id, count|
+          centroid[context_id] += count.to_f64 * idf
+        end
+      end
+
+      # Normalize by total IDF
+      if total_idf > 0
+        centroid.transform_values! { |v| v / total_idf }
+      end
+
+      centroid
+    end
+
+    # Computes centroid for a parent block as average of children's centroids.
+    private def self.compute_parent_centroid(
+      children : Array(Int64),
+      computed_centroids : Hash(Int64, Hash(Int64, Float64))
+    ) : Hash(Int64, Float64)
+      return Hash(Int64, Float64).new if children.empty?
+
+      centroid = Hash(Int64, Float64).new(0.0)
+      count = 0
+
+      children.each do |child_id|
+        child_centroid = computed_centroids[child_id]?
+        next unless child_centroid && !child_centroid.empty?
+        count += 1
+
+        child_centroid.each do |context_id, weight|
+          centroid[context_id] += weight
+        end
+      end
+
+      # Average
+      if count > 0
+        centroid.transform_values! { |v| v / count }
+      end
+
+      centroid
+    end
+
+    # Loads all token co-occurrence vectors for a model.
+    private def self.load_all_token_vectors(db : DB::Database, model : String) : Hash(Int64, Hash(Int64, Int64))
+      vectors = Hash(Int64, Hash(Int64, Int64)).new { |h, k| h[k] = Hash(Int64, Int64).new }
+      mid = model_id(model)
+
+      db.query("SELECT token_id, context_id, count FROM token_cooccurrence WHERE model_id = ?", mid) do |rs|
+        rs.each do
+          token_id = rs.read(Int64)
+          context_id = rs.read(Int64)
+          count = rs.read(Int64)
+          vectors[token_id][context_id] = count
+        end
+      end
+
+      vectors
+    end
+
+    # Loads IDF for all tokens.
+    private def self.load_token_idfs(db : DB::Database, total_files : Float64) : Hash(Int64, Float64)
+      idfs = Hash(Int64, Float64).new
+
+      db.query("SELECT token_id, df FROM tokens") do |rs|
+        rs.each do
+          token_id = rs.read(Int64)
+          df = rs.read(Int32).to_f64
+          # IDF: ln((N + 1) / (df + 1)) + 1
+          idfs[token_id] = Math.log((total_files + 1.0) / (df + 1.0)) + 1.0
+        end
+      end
+
+      idfs
     end
 
   end

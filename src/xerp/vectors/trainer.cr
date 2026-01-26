@@ -10,9 +10,10 @@ module Xerp::Vectors
     getter model : String
     getter pairs_stored : Int64
     getter neighbors_computed : Int64
+    getter centroids_computed : Int64
     getter elapsed_ms : Int64
 
-    def initialize(@model, @pairs_stored, @neighbors_computed, @elapsed_ms)
+    def initialize(@model, @pairs_stored, @neighbors_computed, @centroids_computed, @elapsed_ms)
     end
   end
 
@@ -62,8 +63,11 @@ module Xerp::Vectors
           # Compute nearest neighbors for this model
           neighbors_computed = Cooccurrence.compute_neighbors(db, m, min_count, top_neighbors)
 
+          # Compute hierarchical block centroids for this model
+          centroids_computed = Cooccurrence.compute_block_centroids(db, m)
+
           model_elapsed = (Time.monotonic - model_start).total_milliseconds.to_i64
-          stats = TrainStats.new(m, pairs_stored, neighbors_computed, model_elapsed)
+          stats = TrainStats.new(m, pairs_stored, neighbors_computed, centroids_computed, model_elapsed)
 
           case m
           when Cooccurrence::MODEL_LINE
@@ -86,14 +90,17 @@ module Xerp::Vectors
     def clear(model : String? = nil) : Nil
       @database.with_migrated_connection do |db|
         if model
-          db.exec("DELETE FROM token_cooccurrence WHERE model = ?", model)
-          db.exec("DELETE FROM token_neighbors WHERE model = ?", model)
-          db.exec("DELETE FROM token_vector_norms WHERE model = ?", model)
+          mid = Cooccurrence.model_id(model)
+          db.exec("DELETE FROM token_cooccurrence WHERE model_id = ?", mid)
+          db.exec("DELETE FROM token_neighbors WHERE model_id = ?", mid)
+          db.exec("DELETE FROM token_vector_norms WHERE model_id = ?", mid)
+          db.exec("DELETE FROM block_centroids WHERE model_id = ?", mid)
           db.exec("DELETE FROM meta WHERE key LIKE ?", "tokenvec.#{model}.%")
         else
           db.exec("DELETE FROM token_cooccurrence")
           db.exec("DELETE FROM token_neighbors")
           db.exec("DELETE FROM token_vector_norms")
+          db.exec("DELETE FROM block_centroids")
           db.exec("DELETE FROM block_sig_tokens")
           db.exec("DELETE FROM meta WHERE key LIKE 'tokenvec.%'")
         end

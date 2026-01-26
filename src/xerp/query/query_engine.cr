@@ -7,6 +7,7 @@ require "./types"
 require "./expansion"
 require "./scorer"
 require "./scope_scorer"
+require "./centroid_scorer"
 require "./snippet"
 require "./result_id"
 require "./explain"
@@ -63,19 +64,28 @@ module Xerp::Query
           )
         end
 
-        # Expand tokens using configured vector mode
-        expanded = Expansion.expand(db, query_tokens, vector_mode: opts.vector_mode)
+        if opts.semantic
+          # Semantic mode: use block centroid similarity
+          centroid_scores = CentroidScorer.score_blocks(db, query_tokens.to_a, top_k: opts.top_k)
+          total_candidates = centroid_scores.size
 
-        # Score scopes using DESIGN02-00 algorithm
-        scope_scores = ScopeScorer.score_scopes(db, expanded, opts)
-        total_candidates = scope_scores.size
+          # Build results from centroid scores
+          results = build_centroid_results(db, centroid_scores, query_tokens.to_a, opts)
+        else
+          # Standard mode: token-based scoring with expansion
+          expanded = Expansion.expand(db, query_tokens, vector_mode: opts.vector_mode)
 
-        # Build results
-        results = build_scope_results(db, scope_scores, expanded, opts)
+          # Score scopes using DESIGN02-00 algorithm
+          scope_scores = ScopeScorer.score_scopes(db, expanded, opts)
+          total_candidates = scope_scores.size
 
-        # Include expansion info if explaining
-        if opts.explain
-          expanded_tokens_for_response = Expansion.to_entries(expanded)
+          # Build results
+          results = build_scope_results(db, scope_scores, expanded, opts)
+
+          # Include expansion info if explaining
+          if opts.explain
+            expanded_tokens_for_response = Expansion.to_entries(expanded)
+          end
         end
       end
 
@@ -216,6 +226,65 @@ module Xerp::Query
           snippet_start: snippet_result.snippet_start,
           header_text: header_text,
           hits: hits,
+          warn: snippet_result.error,
+          ancestry: ancestry
+        )
+      end
+
+      results
+    end
+
+    # Builds results from centroid-based block scores.
+    private def build_centroid_results(db : DB::Database,
+                                        centroid_scores : Array({Int64, Float64}),
+                                        query_tokens : Array(String),
+                                        opts : QueryOptions) : Array(QueryResult)
+      results = [] of QueryResult
+
+      centroid_scores.each do |(block_id, similarity)|
+        # Get block info
+        block_row = Store::Statements.select_block_by_id(db, block_id)
+        next unless block_row
+
+        # Get file info
+        file_row = Store::Statements.select_file_by_id(db, block_row.file_id)
+        next unless file_row
+
+        # For centroid search, we don't have specific hit lines
+        # Use block start as reference
+        hit_lines = [block_row.line_start]
+
+        # Extract snippet
+        snippet_result = Snippet.extract_with_error(
+          @config.workspace_root,
+          file_row.rel_path,
+          block_row,
+          hit_lines,
+          opts.max_snippet_lines,
+          opts.context_lines
+        )
+
+        # Generate stable result ID
+        result_id = ResultId.generate(file_row.rel_path, block_row, file_row.content_hash)
+
+        # Build ancestry chain if requested
+        ancestry = build_ancestry(db, file_row.id, block_row) if opts.ancestry
+
+        # Get header from immediate parent via line_cache
+        header_text = get_parent_header(db, file_row.id, block_row)
+
+        results << QueryResult.new(
+          result_id: result_id,
+          file_path: file_row.rel_path,
+          file_type: file_row.file_type,
+          block_id: block_id,
+          line_start: block_row.line_start,
+          line_end: block_row.line_end,
+          score: similarity,
+          snippet: snippet_result.content,
+          snippet_start: snippet_result.snippet_start,
+          header_text: header_text,
+          hits: nil,  # No hit info for centroid search
           warn: snippet_result.error,
           ancestry: ancestry
         )

@@ -2,7 +2,7 @@ require "sqlite3"
 
 module Xerp::Store
   module Migrations
-    CURRENT_VERSION = 7
+    CURRENT_VERSION = 8
 
     # Runs all pending migrations on the database.
     def self.migrate!(db : DB::Database) : Nil
@@ -36,6 +36,7 @@ module Xerp::Store
       when 5 then migrate_v5(db)
       when 6 then migrate_v6(db)
       when 7 then migrate_v7(db)
+      when 8 then migrate_v8(db)
       else        raise "Unknown migration version: #{version}"
       end
     end
@@ -406,6 +407,25 @@ module Xerp::Store
       db.exec <<-SQL
         CREATE INDEX idx_token_neighbors_model_similarity
         ON token_neighbors(model_id, token_id, similarity DESC)
+      SQL
+    end
+
+    # Migration v8: Add block_centroids table for hierarchical block centroids
+    # Stores sparse centroid vectors for each block (same format as token_cooccurrence)
+    private def self.migrate_v8(db : DB::Database) : Nil
+      db.exec <<-SQL
+        CREATE TABLE IF NOT EXISTS block_centroids (
+          block_id   INTEGER NOT NULL REFERENCES blocks(block_id) ON DELETE CASCADE,
+          model_id   INTEGER NOT NULL REFERENCES models(model_id),
+          context_id INTEGER NOT NULL,
+          weight     REAL NOT NULL,
+          PRIMARY KEY (block_id, model_id, context_id)
+        )
+      SQL
+
+      db.exec <<-SQL
+        CREATE INDEX idx_block_centroids_model_context
+        ON block_centroids(model_id, context_id)
       SQL
     end
   end
