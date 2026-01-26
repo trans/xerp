@@ -38,9 +38,92 @@ module Xerp::Query
       # Find similar blocks via dot product accumulation
       block_scores = compute_block_similarities(db, model_id, query_centroid, query_norm)
 
-      # Sort by similarity and take top K
+      # Sort by similarity
       sorted = block_scores.to_a.sort_by { |(_, sim)| -sim }
-      sorted.first(top_k)
+
+      # Deduplicate ancestor-descendant pairs before taking top K
+      # (so we don't lose results to deduplication)
+      deduped = deduplicate_ancestry(db, sorted)
+
+      deduped.first(top_k)
+    end
+
+    # Removes redundant ancestor-descendant pairs from results.
+    # For each pair where one block is an ancestor of the other,
+    # keeps only the one with the higher score.
+    private def self.deduplicate_ancestry(db : DB::Database,
+                                          results : Array({Int64, Float64})) : Array({Int64, Float64})
+      return results if results.size <= 1
+
+      # Build score map
+      score_map = results.to_h
+
+      # Load parent_block_id for all result blocks
+      block_ids = results.map(&.[0])
+      parent_map = load_parent_map(db, block_ids)
+
+      # Track which blocks to remove
+      to_remove = Set(Int64).new
+
+      results.each do |(block_id, score)|
+        next if to_remove.includes?(block_id)
+
+        # Walk up ancestry chain - find ALL ancestors in results
+        current = parent_map[block_id]?
+        while current
+          if ancestor_score = score_map[current]?
+            # Found an ancestor in results - keep higher-scoring one
+            if ancestor_score > score
+              # Ancestor wins - remove this child and stop walking
+              # (if we have A > B > C and A scores highest, remove B and C)
+              to_remove << block_id
+              break
+            else
+              # Child wins (or tie) - remove ancestor, continue walking
+              # to find more ancestors to remove
+              to_remove << current
+            end
+          end
+          current = parent_map[current]?
+        end
+      end
+
+      results.reject { |(block_id, _)| to_remove.includes?(block_id) }
+    end
+
+    # Loads parent_block_id for given blocks and their full ancestry chains.
+    # We need to walk all the way up to find ancestors in results, even if
+    # intermediate blocks aren't in the result set.
+    private def self.load_parent_map(db : DB::Database,
+                                     block_ids : Array(Int64)) : Hash(Int64, Int64)
+      parents = Hash(Int64, Int64).new
+      return parents if block_ids.empty?
+
+      # Start with result blocks
+      to_load = block_ids.to_set
+
+      # Iteratively load parents until we've loaded all ancestry chains
+      while !to_load.empty?
+        ids_str = to_load.join(",")
+        new_parents = Set(Int64).new
+
+        db.query("SELECT block_id, parent_block_id FROM blocks WHERE block_id IN (#{ids_str}) AND parent_block_id IS NOT NULL") do |rs|
+          rs.each do
+            block_id = rs.read(Int64)
+            parent_id = rs.read(Int64)
+            parents[block_id] = parent_id
+
+            # If we haven't loaded this parent yet, add it to next round
+            unless parents.has_key?(parent_id)
+              new_parents << parent_id
+            end
+          end
+        end
+
+        to_load = new_parents
+      end
+
+      parents
     end
 
     # Loads co-occurrence vectors for query tokens.
