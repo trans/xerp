@@ -1,9 +1,5 @@
 # TODO
 
-## Query Expansion Control
-
-- [ ] Add `--salience` flag to `query` command (if needed for result ranking)
-
 ## Outline Enhancements
 
 - [ ] `--full-header` option to show multi-line headers
