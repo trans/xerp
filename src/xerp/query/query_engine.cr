@@ -294,6 +294,7 @@ module Xerp::Query
     end
 
     # Gets the header text from the immediate parent block via line_cache.
+    # Uses line just before child as header (not parent's first line).
     private def get_parent_header(db : DB::Database, file_id : Int64, block : Store::BlockRow) : String?
       parent_id = block.parent_block_id
       return nil unless parent_id
@@ -301,24 +302,35 @@ module Xerp::Query
       parent = Store::Statements.select_block_by_id(db, parent_id)
       return nil unless parent
 
-      Store::Statements.select_line_from_cache(db, file_id, parent.line_start)
+      # Use line just before child as header
+      header_line = Math.max(block.line_start - 1, parent.line_start)
+      Store::Statements.select_line_from_cache(db, file_id, header_line)
     end
 
     # Builds the ancestry chain from root to the block's parent.
     # Returns AncestorInfo from outermost ancestor to immediate parent.
+    # Uses the line just before each child as the "header" - this shows
+    # the relevant container (e.g., "module Foo") rather than the first
+    # line of a merged block (e.g., "require ...").
     private def build_ancestry(db : DB::Database, file_id : Int64, block : Store::BlockRow) : Array(AncestorInfo)
       ancestors = [] of AncestorInfo
 
+      child_start = block.line_start
       current_id = block.parent_block_id
+
       while current_id
         parent = Store::Statements.select_block_by_id(db, current_id)
         break unless parent
 
-        # Get header from line_cache
-        if header = Store::Statements.select_line_from_cache(db, file_id, parent.line_start)
-          ancestors.unshift(AncestorInfo.new(parent.line_start, header))
+        # Use line just before child as header (clamped to parent's range)
+        # This shows the relevant container, not the first line of merged block
+        header_line = Math.max(child_start - 1, parent.line_start)
+
+        if header = Store::Statements.select_line_from_cache(db, file_id, header_line)
+          ancestors.unshift(AncestorInfo.new(header_line, header))
         end
 
+        child_start = parent.line_start
         current_id = parent.parent_block_id
       end
 
