@@ -1,5 +1,6 @@
 require "./adapter"
 require "./indent_adapter"
+require "./algol_adapter"
 require "./markdown_adapter"
 require "./window_adapter"
 
@@ -75,7 +76,7 @@ module Xerp::Adapters
     if MARKDOWN_EXTENSIONS.includes?(ext)
       MarkdownAdapter.new
     elsif CODE_EXTENSIONS.includes?(ext)
-      IndentAdapter.new(tab_width, "code")
+      AlgolAdapter.new(tab_width)
     elsif CONFIG_EXTENSIONS.includes?(ext)
       IndentAdapter.new(tab_width, "config")
     else
@@ -83,7 +84,7 @@ module Xerp::Adapters
       basename = File.basename(rel_path).downcase
       case basename
       when "makefile", "gemfile", "rakefile", "dockerfile", "vagrantfile"
-        IndentAdapter.new(tab_width, "code")
+        AlgolAdapter.new(tab_width)
       when "readme", "changelog", "license", "contributing", "authors"
         # These might be text or markdown without extension
         WindowAdapter.new

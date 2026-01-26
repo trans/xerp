@@ -42,6 +42,24 @@ module Xerp::Adapters
     # Lines are 0-indexed in the array.
     abstract def build_blocks(lines : Array(String)) : AdapterResult
 
+    # Returns header keywords for this language (def, class, function, etc.)
+    # Override in language-specific adapters.
+    def header_keywords : Set(String)
+      Set(String).new
+    end
+
+    # Returns footer keywords for this language (end, }, etc.)
+    # Override in language-specific adapters.
+    def footer_keywords : Set(String)
+      Set(String).new
+    end
+
+    # Returns comment markers for this language (#, //, etc.)
+    # Override in language-specific adapters.
+    def comment_markers : Array(String)
+      [] of String
+    end
+
     # Extracts header text from a line, preserving leading whitespace.
     protected def extract_header(line : String, max_len : Int32 = 80) : String?
       return nil if line.strip.empty?
