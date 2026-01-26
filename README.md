@@ -69,6 +69,13 @@ Results show the ancestry chain with line numbers and original indentation, so y
 ```
 xerp query "QUERY" [OPTIONS]
 
+Mode flags:
+  -l, --line           Line mode (textual proximity)
+  -b, --block          Block mode (structural siblings)
+  -e, --expand         Expand query with similar terms (requires training)
+  -n, --no-salience    Disable TF-IDF weighting (raw similarity)
+
+Output options:
   --top N              Number of results (default: 10)
   --no-ancestry        Hide block ancestry chain
   --ellipsis           Show ... between ancestry and snippet
@@ -80,6 +87,15 @@ xerp query "QUERY" [OPTIONS]
   --json               Full JSON output
   --jsonl              One JSON object per result
   --grep               Compact grep-like output
+```
+
+Common patterns:
+```sh
+xerp query "retry"           # default: both modes, TF-IDF salience
+xerp query -l "retry"        # line mode only
+xerp query -b "retry"        # block mode only
+xerp query -e "retry"        # expand with similar terms
+xerp query -e -n "retry"     # semantic search (expand, no salience)
 ```
 
 ### Semantic vectors
@@ -159,6 +175,61 @@ src/http/client.cr
   89|     def fetch(url)
 ```
 
+### Keyword discovery
+
+Analyze the corpus to discover header/footer keywords and comment markers:
+
+```sh
+xerp keywords
+xerp keywords --top 30       # show more results
+xerp keywords --min-count 10 # require more occurrences
+```
+
+Output:
+```
+Header Keywords (% of 1716 header lines containing token):
+  TOKEN                   COUNT    RATIO
+  do                        401    23.4%
+  def                       312    18.2%
+  ...
+
+Footer Keywords (% of 1755 footer lines containing token):
+  TOKEN                   COUNT    RATIO
+  end                       455    25.9%
+  ...
+
+Line Start Characters (potential comment markers):
+  #          1221    15.3%
+  ...
+```
+
+## Configuration
+
+Create `.config/xerp.yaml` in your project root to customize settings:
+
+```yaml
+# INDEX-TIME SETTINGS (requires re-index)
+index:
+  tab_width: 0            # 0 = auto-detect per file
+  max_token_len: 128
+  max_block_lines: 200
+
+# TRAIN-TIME SETTINGS (requires re-train)
+train:
+  cooc_window_size: 5     # co-occurrence window (±N tokens)
+  salience_percent: 0.30  # top N% of tokens by IDF for centroids
+  salience_min: 8         # minimum tokens per block centroid
+  salience_max: 64        # maximum tokens per block centroid
+
+# QUERY-TIME SETTINGS (can change anytime)
+query:
+  top_k: 20               # default number of results
+  max_candidates: 1000
+  expansion_top_k: 8      # neighbors per query token
+  min_similarity: 0.25    # minimum expansion similarity
+  max_df_percent: 22.0    # filter terms in >N% of files
+```
+
 ## How it works
 
 1. **Indexing** - Files are parsed into hierarchical blocks based on indentation (code) or headings (markdown). Tokens are extracted and stored with their locations.
@@ -176,6 +247,7 @@ src/http/client.cr
 ## Files
 
 - `.cache/xerp.db` - SQLite database with index and vectors
+- `.config/xerp.yaml` - Optional configuration file
 
 ## Documentation
 
