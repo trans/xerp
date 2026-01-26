@@ -29,6 +29,14 @@ module Xerp::CLI
       end
     end
 
+    # Analyzes corpus and saves keywords to database. Called by index/train commands.
+    def self.analyze_and_save(database : Store::Database, workspace_root : String, top_k : Int32 = 20, min_count : Int32 = 5) : Int32
+      stats = analyze_positions(database, min_count)
+      first_chars = analyze_first_chars(database, workspace_root)
+      save_keywords(database, stats, first_chars, top_k)
+      stats.size > top_k ? top_k : stats.size
+    end
+
     def self.run(result : Jargon::Result) : Int32
       root = result["root"]?.try(&.as_s) || Dir.current
       root = File.expand_path(root)

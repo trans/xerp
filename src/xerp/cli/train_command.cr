@@ -1,9 +1,11 @@
 require "jargon"
 require "../config"
+require "../store/db"
 require "../vectors/trainer"
 require "../vectors/cooccurrence"
 require "./json_formatter"
 require "./human_formatter"
+require "./keywords_command"
 
 module Xerp::CLI
   module TrainCommand
@@ -58,6 +60,14 @@ module Xerp::CLI
           puts JsonFormatter.format_multi_train_stats(stats, root)
         else
           puts HumanFormatter.format_multi_train_stats(stats, root)
+        end
+
+        # Analyze and save keywords
+        db = Store::Database.new(config.db_path)
+        keyword_count = KeywordsCommand.analyze_and_save(db, root)
+
+        unless json_output
+          puts "Saved #{keyword_count} header/footer keywords"
         end
 
         0
