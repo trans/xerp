@@ -3,6 +3,7 @@ require "../store/types"
 require "../tokenize/kinds"
 require "../util/varint"
 require "../index/blocks_builder"
+require "../vectors/cooccurrence"
 require "./expansion"
 require "./types"
 
@@ -10,6 +11,12 @@ module Xerp::Query::ScopeScorer
   # Scoring parameters (tunable)
   ALPHA  = 0.5  # Size normalization exponent (0.5 = sqrt)
   LAMBDA = 0.5  # Clustering score weight
+
+  # Clustering mode: :centroid (semantic similarity) or :concentration (hit distribution)
+  enum ClusterMode
+    Centroid      # Use centroid similarity (default)
+    Concentration # Use child hit distribution entropy
+  end
 
   # Represents a hit for a single token.
   struct TokenHit
@@ -50,7 +57,8 @@ module Xerp::Query::ScopeScorer
   # Scores scopes based on expanded query tokens using DESIGN02-00 algorithm.
   def self.score_scopes(db : DB::Database,
                         expanded_tokens : Hash(String, Array(Expansion::ExpandedToken)),
-                        opts : QueryOptions) : Array(ScopeScore)
+                        opts : QueryOptions,
+                        cluster_mode : ClusterMode = ClusterMode::Centroid) : Array(ScopeScore)
     # Get corpus statistics
     total_files = Store::Statements.file_count(db).to_f64
     return [] of ScopeScore if total_files == 0
@@ -65,10 +73,22 @@ module Xerp::Query::ScopeScorer
     idf_by_token = compute_idf_map(db, expanded_tokens, total_files)
     candidate_scopes = build_candidate_scopes(db, hit_blocks, idf_by_token, opts.raw_vectors)
 
+    # Precompute centroid similarities if using centroid mode
+    centroid_sims = if cluster_mode.centroid?
+                      compute_centroid_similarities(db, expanded_tokens, candidate_scopes.keys)
+                    else
+                      Hash(Int64, Float64).new
+                    end
+
     # Step 3-7: Compute salience and clustering for each scope
     results = candidate_scopes.map do |block_id, acc|
       salience = compute_salience(acc, idf_by_token)
-      cluster = compute_clustering(acc)
+      cluster = case cluster_mode
+                when .centroid?
+                  centroid_sims[block_id]? || 0.0
+                else
+                  compute_clustering(acc)
+                end
       final_score = salience * (1.0 + LAMBDA * cluster)
 
       ScopeScore.new(
@@ -425,5 +445,93 @@ module Xerp::Query::ScopeScorer
 
     # cluster = 1 - (H / H_max)
     1.0 - (entropy / h_max)
+  end
+
+  # Computes centroid similarity between query and candidate blocks.
+  # Returns block_id -> similarity (0.0 to 1.0).
+  private def self.compute_centroid_similarities(db : DB::Database,
+                                                  expanded_tokens : Hash(String, Array(Expansion::ExpandedToken)),
+                                                  block_ids : Array(Int64)) : Hash(Int64, Float64)
+    similarities = Hash(Int64, Float64).new
+
+    # Build query centroid from expanded tokens
+    query_centroid = build_query_centroid(db, expanded_tokens)
+    return similarities if query_centroid.empty?
+
+    # Project to dense and normalize
+    query_dense = Vectors::Cooccurrence.project_to_dense(query_centroid)
+    query_dense = Vectors::Cooccurrence.normalize_vector(query_dense)
+
+    # Load block centroids and compute similarities
+    model_id = Vectors::Cooccurrence.model_id(Vectors::Cooccurrence::MODEL_SCOPE)
+    block_ids_str = block_ids.join(",")
+    return similarities if block_ids_str.empty?
+
+    db.query("SELECT block_id, vector FROM block_centroid_dense WHERE model_id = ? AND block_id IN (#{block_ids_str})",
+             model_id) do |rs|
+      rs.each do
+        block_id = rs.read(Int64)
+        blob = rs.read(Bytes)
+        block_dense = Vectors::Cooccurrence.dequantize_blob(blob)
+
+        # Compute cosine similarity (dot product of unit vectors)
+        sim = 0.0
+        Vectors::Cooccurrence::DENSE_DIMS.times do |i|
+          sim += query_dense[i] * block_dense[i]
+        end
+
+        similarities[block_id] = sim.clamp(0.0, 1.0)
+      end
+    end
+
+    similarities
+  end
+
+  # Builds a sparse query centroid from expanded tokens.
+  private def self.build_query_centroid(db : DB::Database,
+                                         expanded_tokens : Hash(String, Array(Expansion::ExpandedToken))) : Hash(Int64, Float64)
+    centroid = Hash(Int64, Float64).new(0.0)
+    model_id = Vectors::Cooccurrence.model_id(Vectors::Cooccurrence::MODEL_SCOPE)
+
+    # Collect token IDs from expanded tokens
+    token_ids = Set(Int64).new
+    expanded_tokens.each do |_, expansions|
+      expansions.each do |exp|
+        token_ids << exp.token_id.not_nil! if exp.token_id
+      end
+    end
+
+    return centroid if token_ids.empty?
+
+    # Load co-occurrence vectors for tokens
+    ids_str = token_ids.join(",")
+    token_vectors = Hash(Int64, Hash(Int64, Int64)).new { |h, k| h[k] = Hash(Int64, Int64).new }
+
+    db.query("SELECT token_id, context_id, count FROM token_cooccurrence WHERE model_id = ? AND token_id IN (#{ids_str})",
+             model_id) do |rs|
+      rs.each do
+        token_id = rs.read(Int64)
+        context_id = rs.read(Int64)
+        count = rs.read(Int64)
+        token_vectors[token_id][context_id] = count
+      end
+    end
+
+    return centroid if token_vectors.empty?
+
+    # Average the vectors
+    count = 0
+    token_vectors.each do |_, vec|
+      next if vec.empty?
+      count += 1
+      vec.each do |context_id, c|
+        centroid[context_id] += c.to_f64
+      end
+    end
+
+    return centroid if count == 0
+
+    centroid.transform_values! { |v| v / count }
+    centroid
   end
 end
