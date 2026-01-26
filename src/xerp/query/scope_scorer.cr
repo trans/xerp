@@ -10,7 +10,7 @@ require "./types"
 module Xerp::Query::ScopeScorer
   # Scoring parameters (tunable)
   ALPHA  = 0.5  # Size normalization exponent (0.5 = sqrt)
-  LAMBDA = 0.5  # Clustering score weight
+  LAMBDA = 0.2  # Clustering score weight (max 20% boost)
 
   # Clustering mode: :centroid (semantic similarity) or :concentration (hit distribution)
   enum ClusterMode
