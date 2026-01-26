@@ -12,6 +12,7 @@ module Xerp::Adapters
 
     def initialize(@window_size : Int32 = DEFAULT_WINDOW_SIZE,
                    @window_overlap : Int32 = DEFAULT_WINDOW_OVERLAP)
+      super()  # Initialize keyword_context with empty default
     end
 
     def file_type : String

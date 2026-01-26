@@ -1,3 +1,5 @@
+require "./keyword_context"
+
 module Xerp::Adapters
   # Information about a detected block.
   struct BlockInfo
@@ -35,6 +37,11 @@ module Xerp::Adapters
 
   # Base class for adapters that detect structural blocks in files.
   abstract class Adapter
+    getter keyword_context : KeywordContext
+
+    def initialize(@keyword_context : KeywordContext = KeywordContext.empty)
+    end
+
     # Returns the file type string for this adapter.
     abstract def file_type : String
 
@@ -58,6 +65,20 @@ module Xerp::Adapters
     # Override in language-specific adapters.
     def comment_markers : Array(String)
       [] of String
+    end
+
+    # Returns effective header keywords (learned + hardcoded merged).
+    def effective_header_keywords : Set(String)
+      result = header_keywords.dup
+      @keyword_context.header_keywords.each_key { |k| result << k }
+      result
+    end
+
+    # Returns effective footer keywords (learned + hardcoded merged).
+    def effective_footer_keywords : Set(String)
+      result = footer_keywords.dup
+      @keyword_context.footer_keywords.each_key { |k| result << k }
+      result
     end
 
     # Extracts header text from a line, preserving leading whitespace.

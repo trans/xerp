@@ -369,6 +369,18 @@ module Xerp::Store
       result
     end
 
+    # --- Keywords ---
+
+    def self.select_keywords_by_kind(db : DB::Database, kind : String) : Array({String, Float64})
+      results = [] of {String, Float64}
+      db.query("SELECT token, ratio FROM keywords WHERE kind = ? ORDER BY ratio DESC", kind) do |rs|
+        rs.each do
+          results << {rs.read(String), rs.read(Float64)}
+        end
+      end
+      results
+    end
+
     # --- Utility ---
 
     def self.file_count(db : DB::Database) : Int64

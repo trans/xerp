@@ -36,8 +36,8 @@ module Xerp::Adapters
     # Comment markers
     COMMENT_MARKERS = ["#", "//", "/*", "*", "--", ";"]
 
-    def initialize(tab_width : Int32 = 0)
-      super(tab_width, "code")
+    def initialize(tab_width : Int32 = 0, keyword_context : KeywordContext = KeywordContext.empty)
+      super(tab_width, "code", keyword_context)
     end
 
     def header_keywords : Set(String)

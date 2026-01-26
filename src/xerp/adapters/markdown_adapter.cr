@@ -5,6 +5,10 @@ module Xerp::Adapters
   class MarkdownAdapter < Adapter
     HEADING_PATTERN = /^(\#{1,6})\s+(.*)$/
 
+    def initialize
+      super()  # Initialize keyword_context with empty default
+    end
+
     def file_type : String
       "markdown"
     end

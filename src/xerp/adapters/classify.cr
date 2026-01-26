@@ -1,4 +1,5 @@
 require "./adapter"
+require "./keyword_context"
 require "./indent_adapter"
 require "./algol_adapter"
 require "./markdown_adapter"
@@ -70,21 +71,22 @@ module Xerp::Adapters
   }
 
   # Classifies a file and returns the appropriate adapter.
-  def self.classify(rel_path : String, tab_width : Int32 = 4) : Adapter
+  def self.classify(rel_path : String, tab_width : Int32 = 4,
+                    keyword_context : KeywordContext = KeywordContext.empty) : Adapter
     ext = File.extname(rel_path).downcase
 
     if MARKDOWN_EXTENSIONS.includes?(ext)
       MarkdownAdapter.new
     elsif CODE_EXTENSIONS.includes?(ext)
-      AlgolAdapter.new(tab_width)
+      AlgolAdapter.new(tab_width, keyword_context)
     elsif CONFIG_EXTENSIONS.includes?(ext)
-      IndentAdapter.new(tab_width, "config")
+      IndentAdapter.new(tab_width, "config", keyword_context)
     else
       # Check for common filenames
       basename = File.basename(rel_path).downcase
       case basename
       when "makefile", "gemfile", "rakefile", "dockerfile", "vagrantfile"
-        AlgolAdapter.new(tab_width)
+        AlgolAdapter.new(tab_width, keyword_context)
       when "readme", "changelog", "license", "contributing", "authors"
         # These might be text or markdown without extension
         WindowAdapter.new

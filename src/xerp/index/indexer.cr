@@ -2,6 +2,7 @@ require "../config"
 require "../store/db"
 require "../store/statements"
 require "../adapters/classify"
+require "../adapters/keyword_context"
 require "../tokenize/tokenizer"
 require "../tokenize/compound"
 require "../util/time"
@@ -58,6 +59,9 @@ module Xerp::Index
           db.exec("DELETE FROM files")
         end
 
+        # Load learned keywords (empty if rebuild or first index)
+        keyword_context = rebuild ? Adapters::KeywordContext.empty : load_keyword_context(db)
+
         scanner.scan do |scanned_file|
           seen_paths << scanned_file.rel_path
 
@@ -77,7 +81,7 @@ module Xerp::Index
           end
 
           # Index the file
-          token_ids = index_file_internal(db, scanned_file)
+          token_ids = index_file_internal(db, scanned_file, keyword_context)
           all_token_ids.concat(token_ids)
           files_indexed += 1
         end
@@ -133,9 +137,10 @@ module Xerp::Index
       removed
     end
 
-    private def index_file_internal(db : DB::Database, file : ScannedFile) : Set(Int64)
+    private def index_file_internal(db : DB::Database, file : ScannedFile,
+                                     keyword_context : Adapters::KeywordContext = Adapters::KeywordContext.empty) : Set(Int64)
       # Get adapter for file type
-      adapter = Adapters.classify(file.rel_path, @config.tab_width)
+      adapter = Adapters.classify(file.rel_path, @config.tab_width, keyword_context)
 
       # Build blocks
       block_result = adapter.build_blocks(file.lines)
@@ -191,6 +196,19 @@ module Xerp::Index
       end
 
       removed
+    end
+
+    # Loads learned keywords from the database into a KeywordContext.
+    private def load_keyword_context(db : DB::Database) : Adapters::KeywordContext
+      headers = {} of String => Float64
+      footers = {} of String => Float64
+      comments = [] of String
+
+      Store::Statements.select_keywords_by_kind(db, "header").each { |(t, r)| headers[t] = r }
+      Store::Statements.select_keywords_by_kind(db, "footer").each { |(t, r)| footers[t] = r }
+      Store::Statements.select_keywords_by_kind(db, "comment").each { |(t, _)| comments << t }
+
+      Adapters::KeywordContext.new(headers, footers, comments)
     end
   end
 end
