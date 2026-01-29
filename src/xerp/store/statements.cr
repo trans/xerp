@@ -8,7 +8,7 @@ module Xerp::Store
 
     def self.upsert_file(db : DB::Database, rel_path : String, file_type : String,
                          mtime : Int64, size : Int64, line_count : Int32,
-                         content_hash : String, indexed_at : String) : Int64
+                         content_hash : Bytes, indexed_at : String) : Int64
       db.exec(<<-SQL, rel_path, file_type, mtime, size, line_count, content_hash, indexed_at)
         INSERT INTO files (rel_path, file_type, mtime, size, line_count, content_hash, indexed_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -24,19 +24,35 @@ module Xerp::Store
     end
 
     def self.select_file_by_path(db : DB::Database, rel_path : String) : FileRow?
-      db.query_one?(<<-SQL, rel_path, as: {Int64, String, String, Int64, Int64, Int32, String, String})
+      db.query(<<-SQL, rel_path) do |rs|
         SELECT file_id, rel_path, file_type, mtime, size, line_count, content_hash, indexed_at
         FROM files WHERE rel_path = ?
       SQL
-        .try { |row| FileRow.new(*row) }
+        rs.each do
+          return FileRow.new(
+            rs.read(Int64), rs.read(String), rs.read(String),
+            rs.read(Int64), rs.read(Int64), rs.read(Int32),
+            rs.read(Bytes), rs.read(String)
+          )
+        end
+      end
+      nil
     end
 
     def self.select_file_by_id(db : DB::Database, file_id : Int64) : FileRow?
-      db.query_one?(<<-SQL, file_id, as: {Int64, String, String, Int64, Int64, Int32, String, String})
+      db.query(<<-SQL, file_id) do |rs|
         SELECT file_id, rel_path, file_type, mtime, size, line_count, content_hash, indexed_at
         FROM files WHERE file_id = ?
       SQL
-        .try { |row| FileRow.new(*row) }
+        rs.each do
+          return FileRow.new(
+            rs.read(Int64), rs.read(String), rs.read(String),
+            rs.read(Int64), rs.read(Int64), rs.read(Int32),
+            rs.read(Bytes), rs.read(String)
+          )
+        end
+      end
+      nil
     end
 
     def self.delete_file(db : DB::Database, file_id : Int64) : Nil
@@ -53,7 +69,7 @@ module Xerp::Store
           results << FileRow.new(
             rs.read(Int64), rs.read(String), rs.read(String),
             rs.read(Int64), rs.read(Int64), rs.read(Int32),
-            rs.read(String), rs.read(String)
+            rs.read(Bytes), rs.read(String)
           )
         end
       end
@@ -137,10 +153,10 @@ module Xerp::Store
 
     def self.insert_block(db : DB::Database, file_id : Int64, kind : String, level : Int32,
                           line_start : Int32, line_end : Int32,
-                          parent_block_id : Int64?) : Int64
-      db.exec(<<-SQL, file_id, kind, level, line_start, line_end, parent_block_id)
-        INSERT INTO blocks (file_id, kind, level, start_line, end_line, parent_block_id)
-        VALUES (?, ?, ?, ?, ?, ?)
+                          parent_block_id : Int64?, content_hash : Bytes? = nil) : Int64
+      db.exec(<<-SQL, file_id, kind, level, line_start, line_end, parent_block_id, content_hash)
+        INSERT INTO blocks (file_id, kind, level, start_line, end_line, parent_block_id, content_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       SQL
       db.scalar("SELECT last_insert_rowid()").as(Int64)
     end
@@ -148,13 +164,14 @@ module Xerp::Store
     def self.select_blocks_by_file(db : DB::Database, file_id : Int64) : Array(BlockRow)
       results = [] of BlockRow
       db.query(<<-SQL, file_id) do |rs|
-        SELECT block_id, file_id, kind, level, start_line, end_line, parent_block_id, token_count
+        SELECT block_id, file_id, kind, level, start_line, end_line, parent_block_id, token_count, content_hash
         FROM blocks WHERE file_id = ?
       SQL
         rs.each do
           results << BlockRow.new(
             rs.read(Int64), rs.read(Int64), rs.read(String), rs.read(Int32),
-            rs.read(Int32), rs.read(Int32), rs.read(Int64?), rs.read(Int32)
+            rs.read(Int32), rs.read(Int32), rs.read(Int64?), rs.read(Int32),
+            rs.read(Bytes?)
           )
         end
       end
@@ -162,11 +179,19 @@ module Xerp::Store
     end
 
     def self.select_block_by_id(db : DB::Database, block_id : Int64) : BlockRow?
-      db.query_one?(<<-SQL, block_id, as: {Int64, Int64, String, Int32, Int32, Int32, Int64?, Int32})
-        SELECT block_id, file_id, kind, level, start_line, end_line, parent_block_id, token_count
+      db.query(<<-SQL, block_id) do |rs|
+        SELECT block_id, file_id, kind, level, start_line, end_line, parent_block_id, token_count, content_hash
         FROM blocks WHERE block_id = ?
       SQL
-        .try { |row| BlockRow.new(*row) }
+        rs.each do
+          return BlockRow.new(
+            rs.read(Int64), rs.read(Int64), rs.read(String), rs.read(Int32),
+            rs.read(Int32), rs.read(Int32), rs.read(Int64?), rs.read(Int32),
+            rs.read(Bytes?)
+          )
+        end
+      end
+      nil
     end
 
     def self.delete_blocks_by_file(db : DB::Database, file_id : Int64) : Nil

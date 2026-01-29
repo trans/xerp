@@ -2,7 +2,7 @@ require "sqlite3"
 
 module Xerp::Store
   module Migrations
-    CURRENT_VERSION = 9
+    CURRENT_VERSION = 10
 
     # Runs all pending migrations on the database.
     def self.migrate!(db : DB::Database) : Nil
@@ -37,8 +37,9 @@ module Xerp::Store
       when 6 then migrate_v6(db)
       when 7 then migrate_v7(db)
       when 8 then migrate_v8(db)
-      when 9 then migrate_v9(db)
-      else        raise "Unknown migration version: #{version}"
+      when 9  then migrate_v9(db)
+      when 10 then migrate_v10(db)
+      else         raise "Unknown migration version: #{version}"
       end
     end
 
@@ -455,6 +456,53 @@ module Xerp::Store
       db.exec <<-SQL
         CREATE INDEX idx_keywords_kind_ratio ON keywords(kind, ratio DESC)
       SQL
+    end
+
+    # Migration v10: Convert content_hash from TEXT (hex) to BLOB, add block content_hash
+    private def self.migrate_v10(db : DB::Database) : Nil
+      # Step 1: Recreate files table with BLOB content_hash
+      db.exec <<-SQL
+        CREATE TABLE files_new (
+          file_id      INTEGER PRIMARY KEY,
+          rel_path     TEXT NOT NULL UNIQUE,
+          file_type    TEXT NOT NULL,
+          mtime        INTEGER NOT NULL,
+          size         INTEGER NOT NULL,
+          line_count   INTEGER NOT NULL,
+          content_hash BLOB NOT NULL,
+          indexed_at   TEXT NOT NULL
+        )
+      SQL
+
+      # Convert hex strings to BLOB bytes
+      db.query("SELECT file_id, rel_path, file_type, mtime, size, line_count, content_hash, indexed_at FROM files") do |rs|
+        rs.each do
+          file_id = rs.read(Int64)
+          rel_path = rs.read(String)
+          file_type = rs.read(String)
+          mtime = rs.read(Int64)
+          size = rs.read(Int64)
+          line_count = rs.read(Int32)
+          hex_hash = rs.read(String)
+          indexed_at = rs.read(String)
+
+          # Convert hex string to bytes
+          blob = hex_hash.hexbytes
+
+          db.exec(<<-SQL, file_id, rel_path, file_type, mtime, size, line_count, blob, indexed_at)
+            INSERT INTO files_new (file_id, rel_path, file_type, mtime, size, line_count, content_hash, indexed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          SQL
+        end
+      end
+
+      db.exec "DROP TABLE files"
+      db.exec "ALTER TABLE files_new RENAME TO files"
+      db.exec "CREATE INDEX idx_files_content_hash ON files(content_hash)"
+
+      # Step 2: Add content_hash BLOB column to blocks table
+      # SQLite allows adding nullable columns without recreating
+      db.exec "ALTER TABLE blocks ADD COLUMN content_hash BLOB"
     end
   end
 end

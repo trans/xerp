@@ -3,6 +3,7 @@ require "../store/statements"
 require "../tokenize/tokenizer"
 require "../tokenize/kinds"
 require "../util/varint"
+require "../util/hash"
 
 module Xerp::Index
   module BlocksBuilder
@@ -21,6 +22,9 @@ module Xerp::Index
 
       # First pass: insert all blocks and cache ancestry header lines
       result.blocks.each do |block|
+        # Compute content hash for this block
+        content_hash = compute_block_hash(lines, block.line_start, block.line_end)
+
         block_id = Store::Statements.insert_block(
           db,
           file_id: file_id,
@@ -28,7 +32,8 @@ module Xerp::Index
           level: block.level,
           line_start: block.line_start,
           line_end: block.line_end,
-          parent_block_id: nil  # Set later
+          parent_block_id: nil,  # Set later
+          content_hash: content_hash
         )
         block_ids << block_id
 
@@ -88,6 +93,22 @@ module Xerp::Index
     # Decodes a block_line_map blob back to block_ids per line.
     def self.decode_line_map(blob : Bytes) : Array(Int64)
       Util.decode_u32_list(blob).map(&.to_i64)
+    end
+
+    # Computes a hash for a block's content (lines within the block range).
+    # Returns nil if lines array is empty or range is invalid.
+    private def self.compute_block_hash(lines : Array(String), line_start : Int32, line_end : Int32) : Bytes?
+      return nil if lines.empty?
+
+      # Convert 1-indexed lines to 0-indexed array indices
+      start_idx = line_start - 1
+      end_idx = line_end - 1
+
+      return nil if start_idx < 0 || end_idx >= lines.size || start_idx > end_idx
+
+      # Join the lines in range and hash
+      content = lines[start_idx..end_idx].join("\n")
+      Util.hash_content(content)
     end
 
     # Computes and stores token counts per block.

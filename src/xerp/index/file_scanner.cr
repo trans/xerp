@@ -8,7 +8,7 @@ module Xerp::Index
     getter abs_path : String
     getter mtime : Int64
     getter size : Int64
-    getter content_hash : String
+    getter content_hash : Bytes
     getter lines : Array(String)
 
     def initialize(@rel_path, @abs_path, @mtime, @size, @content_hash, @lines)

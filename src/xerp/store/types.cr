@@ -7,7 +7,7 @@ module Xerp::Store
     getter mtime : Int64
     getter size : Int64
     getter line_count : Int32
-    getter content_hash : String
+    getter content_hash : Bytes
     getter indexed_at : String
 
     def initialize(@id, @rel_path, @file_type, @mtime, @size, @line_count, @content_hash, @indexed_at)
@@ -35,8 +35,9 @@ module Xerp::Store
     getter line_end : Int32
     getter parent_block_id : Int64?
     getter token_count : Int32
+    getter content_hash : Bytes?
 
-    def initialize(@id, @file_id, @kind, @level, @line_start, @line_end, @parent_block_id, @token_count = 0)
+    def initialize(@id, @file_id, @kind, @level, @line_start, @line_end, @parent_block_id, @token_count = 0, @content_hash = nil)
     end
   end
 
