@@ -2,7 +2,7 @@ require "sqlite3"
 
 module Xerp::Store
   module Migrations
-    CURRENT_VERSION = 10
+    CURRENT_VERSION = 11
 
     # Runs all pending migrations on the database.
     def self.migrate!(db : DB::Database) : Nil
@@ -39,6 +39,7 @@ module Xerp::Store
       when 8 then migrate_v8(db)
       when 9  then migrate_v9(db)
       when 10 then migrate_v10(db)
+      when 11 then migrate_v11(db)
       else         raise "Unknown migration version: #{version}"
       end
     end
@@ -503,6 +504,24 @@ module Xerp::Store
       # Step 2: Add content_hash BLOB column to blocks table
       # SQLite allows adding nullable columns without recreating
       db.exec "ALTER TABLE blocks ADD COLUMN content_hash BLOB"
+    end
+
+    # Migration v11: Add file_id, line_start, line_end to feedback tables
+    # Enables token lookup from feedback without reversing result_id hash
+    private def self.migrate_v11(db : DB::Database) : Nil
+      # Add columns to feedback_events
+      db.exec "ALTER TABLE feedback_events ADD COLUMN file_id INTEGER REFERENCES files(file_id)"
+      db.exec "ALTER TABLE feedback_events ADD COLUMN line_start INTEGER"
+      db.exec "ALTER TABLE feedback_events ADD COLUMN line_end INTEGER"
+
+      # Add columns to feedback_stats
+      db.exec "ALTER TABLE feedback_stats ADD COLUMN file_id INTEGER REFERENCES files(file_id)"
+      db.exec "ALTER TABLE feedback_stats ADD COLUMN line_start INTEGER"
+      db.exec "ALTER TABLE feedback_stats ADD COLUMN line_end INTEGER"
+
+      # Index for looking up feedback by file
+      db.exec "CREATE INDEX IF NOT EXISTS idx_feedback_events_file ON feedback_events(file_id)"
+      db.exec "CREATE INDEX IF NOT EXISTS idx_feedback_stats_file ON feedback_stats(file_id)"
     end
   end
 end

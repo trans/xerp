@@ -69,8 +69,12 @@ module Xerp::Store
     getter kind : String
     getter note : String?
     getter created_at : String
+    getter file_id : Int64?
+    getter line_start : Int32?
+    getter line_end : Int32?
 
-    def initialize(@id, @result_id, @query_hash, @kind, @note, @created_at)
+    def initialize(@id, @result_id, @query_hash, @kind, @note, @created_at,
+                   @file_id = nil, @line_start = nil, @line_end = nil)
     end
   end
 
@@ -80,8 +84,12 @@ module Xerp::Store
     getter promising_count : Int32
     getter useful_count : Int32
     getter not_useful_count : Int32
+    getter file_id : Int64?
+    getter line_start : Int32?
+    getter line_end : Int32?
 
-    def initialize(@result_id, @promising_count, @useful_count, @not_useful_count)
+    def initialize(@result_id, @promising_count, @useful_count, @not_useful_count,
+                   @file_id = nil, @line_start = nil, @line_end = nil)
     end
   end
 

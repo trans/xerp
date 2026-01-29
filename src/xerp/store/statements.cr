@@ -214,10 +214,12 @@ module Xerp::Store
     # --- Feedback Events ---
 
     def self.insert_feedback_event(db : DB::Database, result_id : String, query_hash : String?,
-                                   kind : String, note : String?, created_at : String) : Int64
-      db.exec(<<-SQL, result_id, query_hash, kind, note, created_at)
-        INSERT INTO feedback_events (result_id, query_hash, kind, note, created_at)
-        VALUES (?, ?, ?, ?, ?)
+                                   kind : String, note : String?, created_at : String,
+                                   file_id : Int64? = nil, line_start : Int32? = nil,
+                                   line_end : Int32? = nil) : Int64
+      db.exec(<<-SQL, result_id, query_hash, kind, note, created_at, file_id, line_start, line_end)
+        INSERT INTO feedback_events (result_id, query_hash, kind, note, created_at, file_id, line_start, line_end)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       SQL
       db.scalar("SELECT last_insert_rowid()").as(Int64)
     end
@@ -225,13 +227,14 @@ module Xerp::Store
     def self.select_feedback_events_by_result(db : DB::Database, result_id : String) : Array(FeedbackEventRow)
       results = [] of FeedbackEventRow
       db.query(<<-SQL, result_id) do |rs|
-        SELECT event_id, result_id, query_hash, kind, note, created_at
+        SELECT event_id, result_id, query_hash, kind, note, created_at, file_id, line_start, line_end
         FROM feedback_events WHERE result_id = ?
       SQL
         rs.each do
           results << FeedbackEventRow.new(
             rs.read(Int64), rs.read(String), rs.read(String?),
-            rs.read(String), rs.read(String?), rs.read(String)
+            rs.read(String), rs.read(String?), rs.read(String),
+            rs.read(Int64?), rs.read(Int32?), rs.read(Int32?)
           )
         end
       end
@@ -242,18 +245,25 @@ module Xerp::Store
 
     def self.upsert_feedback_stats(db : DB::Database, result_id : String,
                                    promising_count : Int32, useful_count : Int32,
-                                   not_useful_count : Int32) : Nil
-      db.exec(<<-SQL, result_id, promising_count, useful_count, not_useful_count)
-        INSERT INTO feedback_stats (result_id, promising_count, useful_count, not_useful_count)
-        VALUES (?, ?, ?, ?)
+                                   not_useful_count : Int32,
+                                   file_id : Int64? = nil, line_start : Int32? = nil,
+                                   line_end : Int32? = nil) : Nil
+      db.exec(<<-SQL, result_id, promising_count, useful_count, not_useful_count, file_id, line_start, line_end)
+        INSERT INTO feedback_stats (result_id, promising_count, useful_count, not_useful_count, file_id, line_start, line_end)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(result_id) DO UPDATE SET
           promising_count = excluded.promising_count,
           useful_count = excluded.useful_count,
-          not_useful_count = excluded.not_useful_count
+          not_useful_count = excluded.not_useful_count,
+          file_id = excluded.file_id,
+          line_start = excluded.line_start,
+          line_end = excluded.line_end
       SQL
     end
 
-    def self.increment_feedback_stat(db : DB::Database, result_id : String, kind : String) : Nil
+    def self.increment_feedback_stat(db : DB::Database, result_id : String, kind : String,
+                                     file_id : Int64? = nil, line_start : Int32? = nil,
+                                     line_end : Int32? = nil) : Nil
       column = case kind
                when "promising"  then "promising_count"
                when "useful"     then "useful_count"
@@ -261,9 +271,9 @@ module Xerp::Store
                else                   raise ArgumentError.new("Unknown feedback kind: #{kind}")
                end
 
-      db.exec(<<-SQL, result_id)
-        INSERT INTO feedback_stats (result_id, promising_count, useful_count, not_useful_count)
-        VALUES (?, 0, 0, 0)
+      db.exec(<<-SQL, result_id, file_id, line_start, line_end)
+        INSERT INTO feedback_stats (result_id, promising_count, useful_count, not_useful_count, file_id, line_start, line_end)
+        VALUES (?, 0, 0, 0, ?, ?, ?)
         ON CONFLICT(result_id) DO NOTHING
       SQL
 
@@ -271,11 +281,18 @@ module Xerp::Store
     end
 
     def self.select_feedback_stats(db : DB::Database, result_id : String) : FeedbackStatsRow?
-      db.query_one?(<<-SQL, result_id, as: {String, Int32, Int32, Int32})
-        SELECT result_id, promising_count, useful_count, not_useful_count
+      db.query(<<-SQL, result_id) do |rs|
+        SELECT result_id, promising_count, useful_count, not_useful_count, file_id, line_start, line_end
         FROM feedback_stats WHERE result_id = ?
       SQL
-        .try { |row| FeedbackStatsRow.new(*row) }
+        rs.each do
+          return FeedbackStatsRow.new(
+            rs.read(String), rs.read(Int32), rs.read(Int32), rs.read(Int32),
+            rs.read(Int64?), rs.read(Int32?), rs.read(Int32?)
+          )
+        end
+      end
+      nil
     end
 
     # --- Token Vectors (v0.2) ---
