@@ -2,7 +2,7 @@ require "sqlite3"
 
 module Xerp::Store
   module Migrations
-    CURRENT_VERSION = 11
+    CURRENT_VERSION = 12
 
     # Runs all pending migrations on the database.
     def self.migrate!(db : DB::Database) : Nil
@@ -40,6 +40,7 @@ module Xerp::Store
       when 9  then migrate_v9(db)
       when 10 then migrate_v10(db)
       when 11 then migrate_v11(db)
+      when 12 then migrate_v12(db)
       else         raise "Unknown migration version: #{version}"
       end
     end
@@ -522,6 +523,67 @@ module Xerp::Store
       # Index for looking up feedback by file
       db.exec "CREATE INDEX IF NOT EXISTS idx_feedback_events_file ON feedback_events(file_id)"
       db.exec "CREATE INDEX IF NOT EXISTS idx_feedback_stats_file ON feedback_stats(file_id)"
+    end
+
+    # Migration v12: Switch to numeric score-based feedback
+    # Replaces kind-based counts with score sum/count for flexible aggregation
+    private def self.migrate_v12(db : DB::Database) : Nil
+      # Recreate feedback_events with score instead of kind
+      db.exec <<-SQL
+        CREATE TABLE feedback_events_new (
+          event_id   INTEGER PRIMARY KEY,
+          result_id  TEXT NOT NULL,
+          score      REAL NOT NULL,
+          note       TEXT,
+          created_at TEXT NOT NULL,
+          file_id    INTEGER REFERENCES files(file_id) ON DELETE SET NULL,
+          line_start INTEGER,
+          line_end   INTEGER
+        )
+      SQL
+
+      # Migrate old events, converting kind to score
+      db.exec <<-SQL
+        INSERT INTO feedback_events_new (event_id, result_id, score, note, created_at, file_id, line_start, line_end)
+        SELECT event_id, result_id,
+               CASE kind
+                 WHEN 'useful' THEN 1.0
+                 WHEN 'promising' THEN 0.3
+                 WHEN 'not_useful' THEN -1.0
+                 ELSE 0.0
+               END,
+               note, created_at, file_id, line_start, line_end
+        FROM feedback_events
+      SQL
+
+      db.exec "DROP TABLE feedback_events"
+      db.exec "ALTER TABLE feedback_events_new RENAME TO feedback_events"
+      db.exec "CREATE INDEX idx_feedback_events_result ON feedback_events(result_id)"
+      db.exec "CREATE INDEX idx_feedback_events_file ON feedback_events(file_id)"
+
+      # Recreate feedback_stats with score-based aggregation
+      db.exec "DROP TABLE IF EXISTS feedback_stats"
+
+      db.exec <<-SQL
+        CREATE TABLE feedback_stats (
+          result_id   TEXT PRIMARY KEY,
+          score_sum   REAL NOT NULL DEFAULT 0,
+          score_count INTEGER NOT NULL DEFAULT 0,
+          file_id     INTEGER REFERENCES files(file_id) ON DELETE SET NULL,
+          line_start  INTEGER,
+          line_end    INTEGER
+        )
+      SQL
+
+      db.exec "CREATE INDEX idx_feedback_stats_file ON feedback_stats(file_id)"
+
+      # Rebuild stats from events
+      db.exec <<-SQL
+        INSERT INTO feedback_stats (result_id, score_sum, score_count, file_id, line_start, line_end)
+        SELECT result_id, SUM(score), COUNT(*), MAX(file_id), MAX(line_start), MAX(line_end)
+        FROM feedback_events
+        GROUP BY result_id
+      SQL
     end
   end
 end

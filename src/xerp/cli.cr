@@ -124,27 +124,20 @@ module Xerp::CLI
   MARK_SCHEMA = %({
     "type": "object",
     "description": "Record feedback on results",
-    "positional": ["result_id"],
+    "positional": ["identifier"],
     "properties": {
-      "result_id": {
+      "identifier": {
         "type": "string",
-        "description": "Result ID to mark"
+        "description": "Result identifier: B123, F45:10-20, or path:start-end"
+      },
+      "score": {
+        "type": "string",
+        "short": "s",
+        "description": "Feedback score from -1.0 to +1.0 (default: 1.0)"
       },
       "root": {
         "type": "string",
         "description": "Workspace root directory"
-      },
-      "useful": {
-        "type": "boolean",
-        "description": "Mark as useful"
-      },
-      "promising": {
-        "type": "boolean",
-        "description": "Mark as promising lead"
-      },
-      "not-useful": {
-        "type": "boolean",
-        "description": "Mark as not useful"
       },
       "note": {
         "type": "string",
@@ -155,7 +148,7 @@ module Xerp::CLI
         "description": "Output as JSON"
       }
     },
-    "required": ["result_id"]
+    "required": ["identifier"]
   })
 
   TRAIN_SCHEMA = %({
@@ -379,7 +372,9 @@ module Xerp::CLI
     puts "  xerp terms retry             # Find related terms"
     puts "  xerp outline                 # Show code structure"
     puts "  xerp outline --file 'src/*'  # Filter by file pattern"
-    puts "  xerp mark abc123 --useful    # Mark result as useful"
+    puts "  xerp mark B123               # Mark block (default score +1.0)"
+    puts "  xerp mark B123 -s 0.5        # Mark with custom positive score"
+    puts "  xerp mark src/foo.cr:10-20 -s -0.5  # Mark with negative score"
     puts
     puts "Query flags:"
     puts "  -l, --line        Line mode"

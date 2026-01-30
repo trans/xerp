@@ -75,11 +75,11 @@ module Xerp::CLI::JsonFormatter
   end
 
   # Formats a mark acknowledgment as JSON (pretty-printed).
-  def self.format_mark_ack(result_id : String, kind : String, event_id : Int64) : String
+  def self.format_mark_ack(result_id : String, score : Float64, event_id : Int64) : String
     JSON.build(indent: "  ") do |json|
       json.object do
         json.field "result_id", result_id
-        json.field "kind", kind
+        json.field "score", score
         json.field "event_id", event_id
         json.field "success", true
       end

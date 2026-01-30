@@ -213,13 +213,13 @@ module Xerp::Store
 
     # --- Feedback Events ---
 
-    def self.insert_feedback_event(db : DB::Database, result_id : String, query_hash : String?,
-                                   kind : String, note : String?, created_at : String,
+    def self.insert_feedback_event(db : DB::Database, result_id : String, score : Float64,
+                                   note : String?, created_at : String,
                                    file_id : Int64? = nil, line_start : Int32? = nil,
                                    line_end : Int32? = nil) : Int64
-      db.exec(<<-SQL, result_id, query_hash, kind, note, created_at, file_id, line_start, line_end)
-        INSERT INTO feedback_events (result_id, query_hash, kind, note, created_at, file_id, line_start, line_end)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      db.exec(<<-SQL, result_id, score, note, created_at, file_id, line_start, line_end)
+        INSERT INTO feedback_events (result_id, score, note, created_at, file_id, line_start, line_end)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       SQL
       db.scalar("SELECT last_insert_rowid()").as(Int64)
     end
@@ -227,13 +227,13 @@ module Xerp::Store
     def self.select_feedback_events_by_result(db : DB::Database, result_id : String) : Array(FeedbackEventRow)
       results = [] of FeedbackEventRow
       db.query(<<-SQL, result_id) do |rs|
-        SELECT event_id, result_id, query_hash, kind, note, created_at, file_id, line_start, line_end
+        SELECT event_id, result_id, score, note, created_at, file_id, line_start, line_end
         FROM feedback_events WHERE result_id = ?
       SQL
         rs.each do
           results << FeedbackEventRow.new(
-            rs.read(Int64), rs.read(String), rs.read(String?),
-            rs.read(String), rs.read(String?), rs.read(String),
+            rs.read(Int64), rs.read(String), rs.read(Float64),
+            rs.read(String?), rs.read(String),
             rs.read(Int64?), rs.read(Int32?), rs.read(Int32?)
           )
         end
@@ -243,56 +243,51 @@ module Xerp::Store
 
     # --- Feedback Stats ---
 
-    def self.upsert_feedback_stats(db : DB::Database, result_id : String,
-                                   promising_count : Int32, useful_count : Int32,
-                                   not_useful_count : Int32,
-                                   file_id : Int64? = nil, line_start : Int32? = nil,
-                                   line_end : Int32? = nil) : Nil
-      db.exec(<<-SQL, result_id, promising_count, useful_count, not_useful_count, file_id, line_start, line_end)
-        INSERT INTO feedback_stats (result_id, promising_count, useful_count, not_useful_count, file_id, line_start, line_end)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+    def self.add_feedback_score(db : DB::Database, result_id : String, score : Float64,
+                                 file_id : Int64? = nil, line_start : Int32? = nil,
+                                 line_end : Int32? = nil) : Nil
+      db.exec(<<-SQL, result_id, score, file_id, line_start, line_end)
+        INSERT INTO feedback_stats (result_id, score_sum, score_count, file_id, line_start, line_end)
+        VALUES (?, ?, 1, ?, ?, ?)
         ON CONFLICT(result_id) DO UPDATE SET
-          promising_count = excluded.promising_count,
-          useful_count = excluded.useful_count,
-          not_useful_count = excluded.not_useful_count,
-          file_id = excluded.file_id,
-          line_start = excluded.line_start,
-          line_end = excluded.line_end
+          score_sum = score_sum + excluded.score_sum,
+          score_count = score_count + 1,
+          file_id = COALESCE(excluded.file_id, file_id),
+          line_start = COALESCE(excluded.line_start, line_start),
+          line_end = COALESCE(excluded.line_end, line_end)
       SQL
-    end
-
-    def self.increment_feedback_stat(db : DB::Database, result_id : String, kind : String,
-                                     file_id : Int64? = nil, line_start : Int32? = nil,
-                                     line_end : Int32? = nil) : Nil
-      column = case kind
-               when "promising"  then "promising_count"
-               when "useful"     then "useful_count"
-               when "not_useful" then "not_useful_count"
-               else                   raise ArgumentError.new("Unknown feedback kind: #{kind}")
-               end
-
-      db.exec(<<-SQL, result_id, file_id, line_start, line_end)
-        INSERT INTO feedback_stats (result_id, promising_count, useful_count, not_useful_count, file_id, line_start, line_end)
-        VALUES (?, 0, 0, 0, ?, ?, ?)
-        ON CONFLICT(result_id) DO NOTHING
-      SQL
-
-      db.exec("UPDATE feedback_stats SET #{column} = #{column} + 1 WHERE result_id = ?", result_id)
     end
 
     def self.select_feedback_stats(db : DB::Database, result_id : String) : FeedbackStatsRow?
       db.query(<<-SQL, result_id) do |rs|
-        SELECT result_id, promising_count, useful_count, not_useful_count, file_id, line_start, line_end
+        SELECT result_id, score_sum, score_count, file_id, line_start, line_end
         FROM feedback_stats WHERE result_id = ?
       SQL
         rs.each do
           return FeedbackStatsRow.new(
-            rs.read(String), rs.read(Int32), rs.read(Int32), rs.read(Int32),
+            rs.read(String), rs.read(Float64), rs.read(Int32),
             rs.read(Int64?), rs.read(Int32?), rs.read(Int32?)
           )
         end
       end
       nil
+    end
+
+    # Returns all feedback stats with file location info (for token aggregation)
+    def self.all_feedback_stats_with_location(db : DB::Database) : Array(FeedbackStatsRow)
+      results = [] of FeedbackStatsRow
+      db.query(<<-SQL) do |rs|
+        SELECT result_id, score_sum, score_count, file_id, line_start, line_end
+        FROM feedback_stats WHERE file_id IS NOT NULL
+      SQL
+        rs.each do
+          results << FeedbackStatsRow.new(
+            rs.read(String), rs.read(Float64), rs.read(Int32),
+            rs.read(Int64?), rs.read(Int32?), rs.read(Int32?)
+          )
+        end
+      end
+      results
     end
 
     # --- Token Vectors (v0.2) ---

@@ -3,28 +3,25 @@ require "../store/statements"
 require "../util/time"
 
 module Xerp::Feedback
-  # Valid feedback kinds.
-  VALID_KINDS = ["promising", "useful", "not_useful"]
-
-  # Marks a result with feedback.
-  def self.mark(db : DB::Database, result_id : String, kind : String,
-                query_hash : String? = nil, note : String? = nil,
+  # Marks a result with a feedback score.
+  # Score should be in range -1.0 to +1.0.
+  def self.mark(db : DB::Database, result_id : String, score : Float64,
+                note : String? = nil,
                 file_id : Int64? = nil, line_start : Int32? = nil,
                 line_end : Int32? = nil) : Int64
-    unless VALID_KINDS.includes?(kind)
-      raise ArgumentError.new("Invalid feedback kind: #{kind}. Must be one of: #{VALID_KINDS.join(", ")}")
-    end
+    # Clamp score to valid range
+    clamped_score = score.clamp(-1.0, 1.0)
 
     created_at = Util.now_iso8601_utc
 
     # Insert the feedback event
     event_id = Store::Statements.insert_feedback_event(
-      db, result_id, query_hash, kind, note, created_at,
+      db, result_id, clamped_score, note, created_at,
       file_id, line_start, line_end
     )
 
-    # Increment the stats counter
-    Store::Statements.increment_feedback_stat(db, result_id, kind, file_id, line_start, line_end)
+    # Update the stats aggregation
+    Store::Statements.add_feedback_score(db, result_id, clamped_score, file_id, line_start, line_end)
 
     event_id
   end

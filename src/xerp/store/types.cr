@@ -65,15 +65,14 @@ module Xerp::Store
   struct FeedbackEventRow
     getter id : Int64
     getter result_id : String
-    getter query_hash : String?
-    getter kind : String
+    getter score : Float64
     getter note : String?
     getter created_at : String
     getter file_id : Int64?
     getter line_start : Int32?
     getter line_end : Int32?
 
-    def initialize(@id, @result_id, @query_hash, @kind, @note, @created_at,
+    def initialize(@id, @result_id, @score, @note, @created_at,
                    @file_id = nil, @line_start = nil, @line_end = nil)
     end
   end
@@ -81,15 +80,19 @@ module Xerp::Store
   # Represents a row from the feedback_stats table.
   struct FeedbackStatsRow
     getter result_id : String
-    getter promising_count : Int32
-    getter useful_count : Int32
-    getter not_useful_count : Int32
+    getter score_sum : Float64
+    getter score_count : Int32
     getter file_id : Int64?
     getter line_start : Int32?
     getter line_end : Int32?
 
-    def initialize(@result_id, @promising_count, @useful_count, @not_useful_count,
+    def initialize(@result_id, @score_sum, @score_count,
                    @file_id = nil, @line_start = nil, @line_end = nil)
+    end
+
+    def score_avg : Float64
+      return 0.0 if @score_count == 0
+      @score_sum / @score_count
     end
   end
 

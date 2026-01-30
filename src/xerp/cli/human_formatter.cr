@@ -142,8 +142,9 @@ module Xerp::CLI::HumanFormatter
   end
 
   # Formats a mark confirmation for human reading.
-  def self.format_mark_confirmation(result_id : String, kind : String) : String
-    "Marked result #{truncate(result_id, 16)} as #{kind.gsub("_", " ")}\n"
+  def self.format_mark_confirmation(identifier : String, score : Float64) : String
+    sign = score >= 0 ? "+" : ""
+    "Marked #{identifier} with score #{sign}#{score}\n"
   end
 
   # Formats training stats for human reading (legacy single model).

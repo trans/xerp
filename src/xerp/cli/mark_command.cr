@@ -24,32 +24,30 @@ module Xerp::CLI
       root = result["root"]?.try(&.as_s) || Dir.current
       root = File.expand_path(root)
 
-      input = result["result_id"]?.try(&.as_s)
+      # Get identifier (required positional)
+      input = result["identifier"]?.try(&.as_s)
       unless input
-        STDERR.puts "Error: No result identifier provided"
+        STDERR.puts "Error: No identifier provided"
+        STDERR.puts "Usage: xerp mark <identifier> [-s score]"
+        STDERR.puts "  identifier: B123, F45:10-20, or path/file.cr:10-20"
         return 1
       end
 
-      # Determine kind from flags (error if multiple specified)
-      kinds = [] of String
-      kinds << "promising" if result["promising"]?.try(&.as_bool)
-      kinds << "useful" if result["useful"]?.try(&.as_bool)
-      kinds << "not_useful" if result["not-useful"]?.try(&.as_bool)
-
-      if kinds.empty?
-        STDERR.puts "Error: Must specify --promising, --useful, or --not-useful"
-        return 1
-      end
-
-      if kinds.size > 1
-        STDERR.puts "Error: Cannot specify multiple feedback types (got: #{kinds.join(", ")})"
-        return 1
-      end
-
-      kind = kinds.first
+      # Get score (optional, default 1.0)
+      score_str = result["score"]?.try(&.as_s)
+      score = if score_str
+                parsed = score_str.to_f64?
+                unless parsed
+                  STDERR.puts "Error: Invalid score: #{score_str}"
+                  STDERR.puts "  score must be a number from -1.0 to +1.0"
+                  return 1
+                end
+                parsed
+              else
+                1.0  # Default to positive feedback
+              end
 
       note = result["note"]?.try(&.as_s)
-      query_hash : String? = nil
       json_output = result["json"]?.try(&.as_bool) || false
 
       # Validate root exists
@@ -74,15 +72,15 @@ module Xerp::CLI
           end
 
           event_id = Feedback.mark(
-            db, resolved.result_id, kind, query_hash, note,
+            db, resolved.result_id, score, note,
             resolved.file_id, resolved.line_start, resolved.line_end
           )
         end
 
         if json_output
-          puts JsonFormatter.format_mark_ack(resolved.not_nil!.result_id, kind, event_id)
+          puts JsonFormatter.format_mark_ack(resolved.not_nil!.result_id, score, event_id)
         else
-          puts HumanFormatter.format_mark_confirmation(resolved.not_nil!.result_id, kind)
+          puts HumanFormatter.format_mark_confirmation(input, score)
         end
 
         0
