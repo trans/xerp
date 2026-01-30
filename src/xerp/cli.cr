@@ -306,14 +306,14 @@ module Xerp::CLI
     end
 
     cli = Jargon.new("xerp")
-    cli.subcommand("index", INDEX_SCHEMA)
-    cli.subcommand("query", QUERY_SCHEMA)
-    cli.subcommand("q", QUERY_SCHEMA)  # alias
-    cli.subcommand("mark", MARK_SCHEMA)
-    cli.subcommand("train", TRAIN_SCHEMA)
-    cli.subcommand("terms", TERMS_SCHEMA)
-    cli.subcommand("outline", OUTLINE_SCHEMA)
-    cli.subcommand("keywords", KEYWORDS_SCHEMA)
+    cli.subcommand("index", json: INDEX_SCHEMA)
+    cli.subcommand("query", json: QUERY_SCHEMA)
+    cli.subcommand("q", json: QUERY_SCHEMA)  # alias
+    cli.subcommand("mark", json: MARK_SCHEMA)
+    cli.subcommand("train", json: TRAIN_SCHEMA)
+    cli.subcommand("terms", json: TERMS_SCHEMA)
+    cli.subcommand("outline", json: OUTLINE_SCHEMA)
+    cli.subcommand("keywords", json: KEYWORDS_SCHEMA)
     cli.default_subcommand("query")
 
     result = cli.parse(args)
