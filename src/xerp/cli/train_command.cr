@@ -49,6 +49,11 @@ module Xerp::CLI
           return 0
         end
 
+        unless json_output
+          puts "Training vectors for #{root}..."
+          STDOUT.flush
+        end
+
         stats = trainer.train(
           model: model,
           window_size: window,
@@ -59,7 +64,7 @@ module Xerp::CLI
         if json_output
           puts JsonFormatter.format_multi_train_stats(stats, root)
         else
-          puts HumanFormatter.format_multi_train_stats(stats, root)
+          puts HumanFormatter.format_multi_train_stats(stats)
         end
 
         # Analyze and save keywords

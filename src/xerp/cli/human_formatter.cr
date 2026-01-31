@@ -174,12 +174,8 @@ module Xerp::CLI::HumanFormatter
   end
 
   # Formats multi-model training stats for human reading.
-  def self.format_multi_train_stats(stats : Vectors::MultiModelTrainStats, workspace_root : String) : String
+  def self.format_multi_train_stats(stats : Vectors::MultiModelTrainStats) : String
     result = String::Builder.new
-
-    result << "Training vectors for "
-    result << workspace_root
-    result << "...\n\n"
 
     if line_stats = stats.line_stats
       result << "line (textual proximity):\n"

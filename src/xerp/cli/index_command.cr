@@ -43,13 +43,18 @@ module Xerp::CLI
 
         # Train vectors if requested
         if train_vectors
+          unless json_output
+            puts "Training vectors for #{root}..."
+            STDOUT.flush
+          end
+
           trainer = Vectors::Trainer.new(config)
           train_stats = trainer.train
 
           if json_output
             puts JsonFormatter.format_multi_train_stats(train_stats, root)
           else
-            puts HumanFormatter.format_multi_train_stats(train_stats, root)
+            puts HumanFormatter.format_multi_train_stats(train_stats)
           end
         end
 
