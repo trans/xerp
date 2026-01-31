@@ -2,7 +2,7 @@ require "sqlite3"
 
 module Xerp::Store
   module Migrations
-    CURRENT_VERSION = 12
+    CURRENT_VERSION = 13
 
     # Runs all pending migrations on the database.
     def self.migrate!(db : DB::Database) : Nil
@@ -41,6 +41,7 @@ module Xerp::Store
       when 10 then migrate_v10(db)
       when 11 then migrate_v11(db)
       when 12 then migrate_v12(db)
+      when 13 then migrate_v13(db)
       else         raise "Unknown migration version: #{version}"
       end
     end
@@ -583,6 +584,18 @@ module Xerp::Store
         SELECT result_id, SUM(score), COUNT(*), MAX(file_id), MAX(line_start), MAX(line_end)
         FROM feedback_events
         GROUP BY result_id
+      SQL
+    end
+
+    # Migration v13: Token-level feedback aggregation table
+    # Allows boosting tokens that appear in positively-marked results
+    private def self.migrate_v13(db : DB::Database) : Nil
+      db.exec <<-SQL
+        CREATE TABLE IF NOT EXISTS token_feedback (
+          token_id    INTEGER PRIMARY KEY REFERENCES tokens(token_id) ON DELETE CASCADE,
+          score_sum   REAL NOT NULL DEFAULT 0,
+          score_count INTEGER NOT NULL DEFAULT 0
+        )
       SQL
     end
   end

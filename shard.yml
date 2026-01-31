@@ -19,3 +19,5 @@ dependencies:
     github: trans/jargon
   ignoreme:
     github: trans/ignoreme
+  usearch:
+    path: ../usearch.cr

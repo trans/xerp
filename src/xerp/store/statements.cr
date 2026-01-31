@@ -290,6 +290,44 @@ module Xerp::Store
       results
     end
 
+    # --- Token-Level Feedback ---
+
+    # Updates token feedback score aggregation (adds score, increments count)
+    def self.add_token_feedback_score(db : DB::Database, token_id : Int64, score : Float64) : Nil
+      db.exec(<<-SQL, token_id, score)
+        INSERT INTO token_feedback (token_id, score_sum, score_count)
+        VALUES (?, ?, 1)
+        ON CONFLICT(token_id) DO UPDATE SET
+          score_sum = score_sum + excluded.score_sum,
+          score_count = score_count + 1
+      SQL
+    end
+
+    # Gets feedback scores for multiple token IDs
+    # Returns hash of token_id => {score_sum, score_count}
+    def self.select_token_feedback_bulk(db : DB::Database, token_ids : Array(Int64)) : Hash(Int64, {Float64, Int32})
+      return {} of Int64 => {Float64, Int32} if token_ids.empty?
+
+      results = {} of Int64 => {Float64, Int32}
+      placeholders = token_ids.map { "?" }.join(", ")
+
+      db.query("SELECT token_id, score_sum, score_count FROM token_feedback WHERE token_id IN (#{placeholders})", args: token_ids) do |rs|
+        rs.each do
+          tid = rs.read(Int64)
+          sum = rs.read(Float64)
+          count = rs.read(Int32)
+          results[tid] = {sum, count}
+        end
+      end
+
+      results
+    end
+
+    # Clears all token feedback (for testing/reset)
+    def self.clear_token_feedback(db : DB::Database) : Nil
+      db.exec("DELETE FROM token_feedback")
+    end
+
     # --- Token Vectors (v0.2) ---
 
     def self.upsert_token_vector(db : DB::Database, token_id : Int64, model : String,
@@ -370,40 +408,6 @@ module Xerp::Store
       block = BlockRow.new(result[0], result[1], result[2], result[3], result[4], result[5], result[6], result[7])
       header = result[8]  # from line_cache
       {block, header}
-    end
-
-    # --- Block Centroids ---
-
-    def self.upsert_block_centroid(db : DB::Database, block_id : Int64, model_id : Int32,
-                                   context_id : Int64, weight : Float64) : Nil
-      db.exec(<<-SQL, block_id, model_id, context_id, weight, weight)
-        INSERT INTO block_centroids (block_id, model_id, context_id, weight)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT (block_id, model_id, context_id)
-        DO UPDATE SET weight = ?
-      SQL
-    end
-
-    def self.delete_block_centroids_by_file(db : DB::Database, file_id : Int64) : Nil
-      db.exec(<<-SQL, file_id)
-        DELETE FROM block_centroids
-        WHERE block_id IN (SELECT block_id FROM blocks WHERE file_id = ?)
-      SQL
-    end
-
-    def self.delete_block_centroids_by_model(db : DB::Database, model_id : Int32) : Nil
-      db.exec("DELETE FROM block_centroids WHERE model_id = ?", model_id)
-    end
-
-    def self.select_block_centroid(db : DB::Database, block_id : Int64, model_id : Int32) : Hash(Int64, Float64)
-      result = Hash(Int64, Float64).new
-      db.query("SELECT context_id, weight FROM block_centroids WHERE block_id = ? AND model_id = ?",
-               block_id, model_id) do |rs|
-        rs.each do
-          result[rs.read(Int64)] = rs.read(Float64)
-        end
-      end
-      result
     end
 
     # --- Keywords ---

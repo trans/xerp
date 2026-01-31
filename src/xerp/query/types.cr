@@ -19,7 +19,6 @@ module Xerp::Query
     getter vector_mode : VectorMode
     getter raw_vectors : Bool  # Skip IDF weighting, show pure vector similarity
     getter semantic : Bool     # Use centroid-based block search
-    getter on_the_fly : Bool   # Compute neighbors on-the-fly (no pre-computed table)
 
     def initialize(
       @top_k : Int32 = 20,
@@ -31,8 +30,7 @@ module Xerp::Query
       @context_lines : Int32 = 2,
       @vector_mode : VectorMode = VectorMode::All,
       @raw_vectors : Bool = false,
-      @semantic : Bool = false,
-      @on_the_fly : Bool = true  # Default to on-the-fly (no pre-computed neighbors)
+      @semantic : Bool = false
     )
     end
   end

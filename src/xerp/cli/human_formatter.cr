@@ -160,8 +160,11 @@ module Xerp::CLI::HumanFormatter
     result << "  co-occurrence pairs: "
     result << stats.pairs_stored
     result << "\n"
-    result << "  neighbors computed:  "
-    result << stats.neighbors_computed
+    result << "  tokens indexed:      "
+    result << stats.tokens_indexed
+    result << "\n"
+    result << "  centroids indexed:   "
+    result << stats.centroids_indexed
     result << "\n"
     result << "  time:                "
     result << stats.elapsed_ms
@@ -183,30 +186,27 @@ module Xerp::CLI::HumanFormatter
       result << "  co-occurrence pairs: "
       result << line_stats.pairs_stored
       result << "\n"
-      result << "  neighbors computed:  "
-      result << line_stats.neighbors_computed
-      result << "\n"
-      result << "  block centroids:     "
-      result << line_stats.centroids_computed
+      result << "  tokens indexed:      "
+      result << line_stats.tokens_indexed
       result << "\n"
       result << "  time:                "
       result << line_stats.elapsed_ms
       result << "ms\n\n"
     end
 
-    if scope_stats = stats.scope_stats
+    if block_stats = stats.block_stats
       result << "block (structural siblings):\n"
       result << "  co-occurrence pairs: "
-      result << scope_stats.pairs_stored
+      result << block_stats.pairs_stored
       result << "\n"
-      result << "  neighbors computed:  "
-      result << scope_stats.neighbors_computed
+      result << "  tokens indexed:      "
+      result << block_stats.tokens_indexed
       result << "\n"
-      result << "  block centroids:     "
-      result << scope_stats.centroids_computed
+      result << "  centroids indexed:   "
+      result << block_stats.centroids_indexed
       result << "\n"
       result << "  time:                "
-      result << scope_stats.elapsed_ms
+      result << block_stats.elapsed_ms
       result << "ms\n\n"
     end
 

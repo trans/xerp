@@ -122,10 +122,10 @@ module Xerp::Query::Terms
     when Granularity::Line
       result_sets << extract_from_model(db, query_tokens, opts, Vectors::Cooccurrence::MODEL_LINE, "vector:line")
     when Granularity::Block
-      result_sets << extract_from_model(db, query_tokens, opts, Vectors::Cooccurrence::MODEL_SCOPE, "vector:block")
+      result_sets << extract_from_model(db, query_tokens, opts, Vectors::Cooccurrence::MODEL_BLOCK, "vector:block")
     when Granularity::All
       result_sets << extract_from_model(db, query_tokens, opts, Vectors::Cooccurrence::MODEL_LINE, "vector:line")
-      result_sets << extract_from_model(db, query_tokens, opts, Vectors::Cooccurrence::MODEL_SCOPE, "vector:block")
+      result_sets << extract_from_model(db, query_tokens, opts, Vectors::Cooccurrence::MODEL_BLOCK, "vector:block")
     when Granularity::Centroid
       result_sets << extract_from_centroid(db, query_tokens, opts, "vector:centroid")
     end
@@ -205,7 +205,7 @@ module Xerp::Query::Terms
 
     # Check if any model is trained
     has_line = Expansion.model_trained?(db, Vectors::Cooccurrence::MODEL_LINE)
-    has_scope = Expansion.model_trained?(db, Vectors::Cooccurrence::MODEL_SCOPE)
+    has_scope = Expansion.model_trained?(db, Vectors::Cooccurrence::MODEL_BLOCK)
     return [] of SalientTerm unless has_line || has_scope
 
     # Get query token IDs

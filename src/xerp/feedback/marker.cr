@@ -1,10 +1,12 @@
 require "../store/db"
 require "../store/statements"
+require "../index/postings_builder"
 require "../util/time"
 
 module Xerp::Feedback
   # Marks a result with a feedback score.
   # Score should be in range -1.0 to +1.0.
+  # Also updates token-level feedback aggregation.
   def self.mark(db : DB::Database, result_id : String, score : Float64,
                 note : String? = nil,
                 file_id : Int64? = nil, line_start : Int32? = nil,
@@ -20,10 +22,35 @@ module Xerp::Feedback
       file_id, line_start, line_end
     )
 
-    # Update the stats aggregation
+    # Update the result-level stats aggregation
     Store::Statements.add_feedback_score(db, result_id, clamped_score, file_id, line_start, line_end)
 
+    # Update token-level feedback if we have location info
+    if file_id && line_start && line_end
+      update_token_feedback(db, file_id, line_start, line_end, clamped_score)
+    end
+
     event_id
+  end
+
+  # Updates token-level feedback scores for all tokens in the given line range.
+  private def self.update_token_feedback(db : DB::Database, file_id : Int64,
+                                          line_start : Int32, line_end : Int32,
+                                          score : Float64) : Nil
+    # Get all postings for this file
+    postings = Store::Statements.select_postings_by_file(db, file_id)
+
+    postings.each do |posting|
+      # Decode the lines where this token appears
+      lines = Index::PostingsBuilder.decode_lines(posting.lines_blob)
+
+      # Check if any line falls within our range
+      has_overlap = lines.any? { |line| line >= line_start && line <= line_end }
+
+      if has_overlap
+        Store::Statements.add_token_feedback_score(db, posting.token_id, score)
+      end
+    end
   end
 
   # Gets feedback stats for a result.

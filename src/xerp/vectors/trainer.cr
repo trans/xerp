@@ -3,34 +3,35 @@ require "../store/db"
 require "../store/statements"
 require "../util/time"
 require "./cooccurrence"
+require "./ann_index"
 
 module Xerp::Vectors
   # Training statistics for a single model
   struct TrainStats
     getter model : String
     getter pairs_stored : Int64
-    getter neighbors_computed : Int64
-    getter centroids_computed : Int64
+    getter tokens_indexed : Int64
+    getter centroids_indexed : Int64
     getter elapsed_ms : Int64
 
-    def initialize(@model, @pairs_stored, @neighbors_computed, @centroids_computed, @elapsed_ms)
+    def initialize(@model, @pairs_stored, @tokens_indexed, @centroids_indexed, @elapsed_ms)
     end
   end
 
   # Aggregate training statistics for multiple models
   struct MultiModelTrainStats
     getter line_stats : TrainStats?
-    getter scope_stats : TrainStats?
+    getter block_stats : TrainStats?
     getter total_elapsed_ms : Int64
 
-    def initialize(@line_stats, @scope_stats, @total_elapsed_ms)
+    def initialize(@line_stats, @block_stats, @total_elapsed_ms)
     end
   end
 
   # Coordinates token vector training for semantic expansion.
-  # v0.2 uses co-occurrence based vectors with two models:
+  # Uses co-occurrence based vectors with two models:
   # - cooc.line.v1: linear sliding-window co-occurrence (textual proximity)
-  # - cooc.scope.v1: level-based isolation (structural siblings)
+  # - cooc.block.v1: level-based isolation (structural siblings)
   class Trainer
     @config : Config
     @database : Store::Database
@@ -48,11 +49,10 @@ module Xerp::Vectors
       start_time = Time.monotonic
 
       line_stats = nil
-      scope_stats = nil
+      block_stats = nil
 
       @database.with_migrated_connection do |db|
-        # Default to line + scope
-        models_to_train = model ? [model] : [Cooccurrence::MODEL_LINE, Cooccurrence::MODEL_SCOPE]
+        models_to_train = model ? [model] : [Cooccurrence::MODEL_LINE, Cooccurrence::MODEL_BLOCK]
 
         models_to_train.each do |m|
           model_start = Time.monotonic
@@ -60,21 +60,31 @@ module Xerp::Vectors
           # Build co-occurrence counts for this model
           pairs_stored = Cooccurrence.build_counts(db, m, window_size)
 
-          # Skip pre-computed neighbors - using on-the-fly computation instead
-          # neighbors_computed = Cooccurrence.compute_neighbors(db, m, min_count, top_neighbors)
-          neighbors_computed = 0_i64
+          # Build token vector index
+          token_index = AnnIndex.create_index
+          tokens_indexed = Cooccurrence.build_token_index(db, m, token_index, min_count)
+          token_path = AnnIndex.token_path(@config.cache_dir, m)
+          token_index.save(token_path)
+          token_index.close
 
-          # Compute hierarchical block centroids for this model
-          centroids_computed = Cooccurrence.compute_block_centroids(db, m)
+          # Build centroid index only for BLOCK model
+          centroids_indexed = 0_i64
+          if m == Cooccurrence::MODEL_BLOCK
+            centroid_index = AnnIndex.create_index
+            centroids_indexed = Cooccurrence.compute_block_centroids(db, m, centroid_index)
+            centroid_path = AnnIndex.centroid_path(@config.cache_dir, m)
+            centroid_index.save(centroid_path)
+            centroid_index.close
+          end
 
           model_elapsed = (Time.monotonic - model_start).total_milliseconds.to_i64
-          stats = TrainStats.new(m, pairs_stored, neighbors_computed, centroids_computed, model_elapsed)
+          stats = TrainStats.new(m, pairs_stored, tokens_indexed, centroids_indexed, model_elapsed)
 
           case m
           when Cooccurrence::MODEL_LINE
             line_stats = stats
-          when Cooccurrence::MODEL_SCOPE
-            scope_stats = stats
+          when Cooccurrence::MODEL_BLOCK
+            block_stats = stats
           end
 
           # Store training metadata for this model
@@ -83,7 +93,7 @@ module Xerp::Vectors
       end
 
       total_elapsed = (Time.monotonic - start_time).total_milliseconds.to_i64
-      MultiModelTrainStats.new(line_stats, scope_stats, total_elapsed)
+      MultiModelTrainStats.new(line_stats, block_stats, total_elapsed)
     end
 
     # Clears vector training data.
@@ -95,17 +105,18 @@ module Xerp::Vectors
           db.exec("DELETE FROM token_cooccurrence WHERE model_id = ?", mid)
           db.exec("DELETE FROM token_neighbors WHERE model_id = ?", mid)
           db.exec("DELETE FROM token_vector_norms WHERE model_id = ?", mid)
-          db.exec("DELETE FROM block_centroids WHERE model_id = ?", mid)
-          db.exec("DELETE FROM block_centroid_dense WHERE model_id = ?", mid)
           db.exec("DELETE FROM meta WHERE key LIKE ?", "tokenvec.#{model}.%")
+          # Delete USearch index file
+          delete_ann_index(model)
         else
           db.exec("DELETE FROM token_cooccurrence")
           db.exec("DELETE FROM token_neighbors")
           db.exec("DELETE FROM token_vector_norms")
-          db.exec("DELETE FROM block_centroids")
-          db.exec("DELETE FROM block_centroid_dense")
           db.exec("DELETE FROM block_sig_tokens")
           db.exec("DELETE FROM meta WHERE key LIKE 'tokenvec.%'")
+          # Delete all USearch index files
+          delete_ann_index(Cooccurrence::MODEL_LINE)
+          delete_ann_index(Cooccurrence::MODEL_BLOCK)
         end
       end
     end
@@ -149,7 +160,7 @@ module Xerp::Vectors
     # Returns metadata for all trained models.
     def all_metadata : Array(Hash(String, String))
       results = [] of Hash(String, String)
-      [Cooccurrence::MODEL_LINE, Cooccurrence::MODEL_SCOPE].each do |m|
+      [Cooccurrence::MODEL_LINE, Cooccurrence::MODEL_BLOCK].each do |m|
         if meta = metadata(m)
           results << meta
         end
@@ -175,6 +186,15 @@ module Xerp::Vectors
 
     private def set_meta(db : DB::Database, key : String, value : String) : Nil
       db.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", key, value)
+    end
+
+    # Deletes USearch index files for a model.
+    private def delete_ann_index(model : String) : Nil
+      token_path = AnnIndex.token_path(@config.cache_dir, model)
+      File.delete(token_path) if File.exists?(token_path)
+
+      centroid_path = AnnIndex.centroid_path(@config.cache_dir, model)
+      File.delete(centroid_path) if File.exists?(centroid_path)
     end
   end
 end

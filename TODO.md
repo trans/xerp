@@ -11,11 +11,8 @@
 
 ## Feedback System
 
-- [ ] Implement token-level feedback scoring in `get_feedback_boosts()`
-  - Tokens in "useful" results get positive boost
-  - Tokens in "not_useful" results get negative boost
-  - Normalize net score to 0-1 range
-- [ ] Currently `mark` command collects data but doesn't influence results
+- [x] ~~Implement token-level feedback scoring in `get_feedback_boosts()`~~ (done)
+- [x] ~~Token feedback now influences expansion scoring~~ (done)
 - [ ] UX: result_id only visible in JSON output, awkward for human use
   - Option A: Add `--ids` flag to show result_ids in human output
   - Option B: Allow `mark [N]` to reference last query results
@@ -43,6 +40,25 @@
   - Challenge: nested structure (`index:`, `train:`, `query:`) vs flat CLI options
   - Challenge: prefer YAML over JSON for config files
   - Maybe: jargon could add YAML support, or we extract subcommand sections manually
+
+## Vector Architecture
+
+- [ ] **Line centroids**: Currently only BLOCK centroids are implemented
+  - Document (`meta/canon/search-and-ranking-architecture.md`) envisions line centroids too
+  - Line centroids would aggregate token vectors for individual lines
+  - Question: Are they useful? Block centroids capture scope semantics well
+  - If implemented: `xerp.centroid.line.usearch` alongside `xerp.centroid.block.usearch`
+
+- [ ] **Separate w_line vs w_block weights for expansion scoring**
+  - Currently `w_sim` weights all similarity equally (LINE and BLOCK models combined)
+  - Original `w_line` naming suggested LINE model might have distinct weight
+  - Consider: `score = w_line * line_sim + w_block * block_sim + w_idf * idf + w_feedback * feedback`
+  - Would allow tuning textual proximity vs structural similarity separately
+
+- [ ] **Units vs Vector Sources decoupling** (per architecture doc)
+  - Default couples them: line unit → line vectors, block unit → block vectors
+  - Advanced overrides could allow: line output with block vectors, etc.
+  - Currently not exposed via CLI
 
 ## Schema Additions
 

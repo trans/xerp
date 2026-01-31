@@ -93,7 +93,8 @@ module Xerp::CLI::JsonFormatter
         json.field "workspace", workspace_root
         json.field "model", stats.model
         json.field "pairs_stored", stats.pairs_stored
-        json.field "neighbors_computed", stats.neighbors_computed
+        json.field "tokens_indexed", stats.tokens_indexed
+        json.field "centroids_indexed", stats.centroids_indexed
         json.field "elapsed_ms", stats.elapsed_ms
       end
     end
@@ -110,18 +111,19 @@ module Xerp::CLI::JsonFormatter
           json.field "line" do
             json.object do
               json.field "pairs_stored", line_stats.pairs_stored
-              json.field "neighbors_computed", line_stats.neighbors_computed
+              json.field "tokens_indexed", line_stats.tokens_indexed
               json.field "elapsed_ms", line_stats.elapsed_ms
             end
           end
         end
 
-        if scope_stats = stats.scope_stats
+        if block_stats = stats.block_stats
           json.field "block" do
             json.object do
-              json.field "pairs_stored", scope_stats.pairs_stored
-              json.field "neighbors_computed", scope_stats.neighbors_computed
-              json.field "elapsed_ms", scope_stats.elapsed_ms
+              json.field "pairs_stored", block_stats.pairs_stored
+              json.field "tokens_indexed", block_stats.tokens_indexed
+              json.field "centroids_indexed", block_stats.centroids_indexed
+              json.field "elapsed_ms", block_stats.elapsed_ms
             end
           end
         end

@@ -3,6 +3,8 @@ require "../store/db"
 require "../store/statements"
 require "../tokenize/tokenizer"
 require "../util/hash"
+require "../vectors/ann_index"
+require "../vectors/cooccurrence"
 require "./types"
 require "./expansion"
 require "./scorer"
@@ -18,10 +20,27 @@ module Xerp::Query
     @config : Config
     @database : Store::Database
     @tokenizer : Tokenize::Tokenizer
+    @centroid_index : USearch::Index?
+    @token_line_index : USearch::Index?
+    @token_block_index : USearch::Index?
 
     def initialize(@config : Config)
       @database = Store::Database.new(@config.db_path)
       @tokenizer = Tokenize::Tokenizer.new(@config.max_token_len)
+      @centroid_index = load_index(Vectors::AnnIndex.centroid_path(@config.cache_dir, Vectors::Cooccurrence::MODEL_BLOCK))
+      @token_line_index = load_index(Vectors::AnnIndex.token_path(@config.cache_dir, Vectors::Cooccurrence::MODEL_LINE))
+      @token_block_index = load_index(Vectors::AnnIndex.token_path(@config.cache_dir, Vectors::Cooccurrence::MODEL_BLOCK))
+    end
+
+    # Loads a USearch index if it exists, returns nil otherwise.
+    private def load_index(path : String) : USearch::Index?
+      if File.exists?(path)
+        Vectors::AnnIndex.view_index(path)
+      else
+        nil
+      end
+    rescue
+      nil
     end
 
     # Runs a query and returns results.
@@ -66,19 +85,22 @@ module Xerp::Query
 
         if opts.semantic
           # Semantic mode: use block centroid similarity
-          centroid_scores = CentroidScorer.score_blocks(db, query_tokens.to_a, top_k: opts.top_k)
+          centroid_scores = CentroidScorer.score_blocks(db, query_tokens.to_a, top_k: opts.top_k, ann_index: @centroid_index)
           total_candidates = centroid_scores.size
 
           # Build results from centroid scores
           results = build_centroid_results(db, centroid_scores, query_tokens.to_a, opts)
         else
           # Standard mode: token-based scoring with expansion
-          expanded = Expansion.expand(db, query_tokens, vector_mode: opts.vector_mode, on_the_fly: opts.on_the_fly)
+          expanded = Expansion.expand(db, query_tokens,
+                                      vector_mode: opts.vector_mode,
+                                      token_line_index: @token_line_index,
+                                      token_block_index: @token_block_index)
 
           # Score scopes using DESIGN02-00 algorithm
           # Use centroid similarity when augment is on, concentration otherwise
           cluster_mode = opts.vector_mode.none? ? ScopeScorer::ClusterMode::Concentration : ScopeScorer::ClusterMode::Centroid
-          scope_scores = ScopeScorer.score_scopes(db, expanded, opts, cluster_mode)
+          scope_scores = ScopeScorer.score_scopes(db, expanded, opts, cluster_mode, @centroid_index)
           total_candidates = scope_scores.size
 
           # Build results

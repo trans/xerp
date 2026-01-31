@@ -1,6 +1,8 @@
+require "usearch"
 require "../store/statements"
 require "../tokenize/kinds"
 require "../vectors/cooccurrence"
+require "../vectors/ann_index"
 require "./types"
 
 module Xerp::Query::Expansion
@@ -11,17 +13,17 @@ module Xerp::Query::Expansion
   KIND_ALLOWLIST          = Set{Tokenize::TokenKind::Ident, Tokenize::TokenKind::Word, Tokenize::TokenKind::Compound}
 
   # Default blend weights for scoring
-  DEFAULT_W_LINE     = 1.0  # Weight for linear model similarity
+  DEFAULT_W_SIM      = 1.0  # Weight for similarity
   DEFAULT_W_IDF      = 0.1  # Weight for IDF boost
   DEFAULT_W_FEEDBACK = 0.2  # Weight for feedback boost
 
   # Blend weights configuration
   struct BlendWeights
-    getter w_line : Float64
+    getter w_sim : Float64
     getter w_idf : Float64
     getter w_feedback : Float64
 
-    def initialize(@w_line = DEFAULT_W_LINE,
+    def initialize(@w_sim = DEFAULT_W_SIM,
                    @w_idf = DEFAULT_W_IDF,
                    @w_feedback = DEFAULT_W_FEEDBACK)
     end
@@ -39,29 +41,22 @@ module Xerp::Query::Expansion
     end
   end
 
-  # Expands query tokens using semantic neighbors if available.
+  # Expands query tokens using semantic neighbors via USearch indexes.
   # Returns identity expansion plus nearest neighbors from trained vectors.
-  # Uses union+rerank blending when both models are trained.
-  # When raw_vectors=true, returns pure similarity scores without IDF weighting.
-  # When on_the_fly=true, computes neighbors from co-occurrence matrix instead of
-  # using pre-computed token_neighbors table.
   def self.expand(db : DB::Database, query_tokens : Array(String),
                   top_k : Int32 = DEFAULT_TOP_K_PER_TOKEN,
                   min_similarity : Float64 = DEFAULT_MIN_SIMILARITY,
                   weights : BlendWeights = BlendWeights.new,
                   max_df_percent : Float64 = DEFAULT_MAX_DF_PERCENT,
                   vector_mode : VectorMode = VectorMode::All,
-                  raw_vectors : Bool = false,
-                  on_the_fly : Bool = false) : Hash(String, Array(ExpandedToken))
+                  token_line_index : USearch::Index? = nil,
+                  token_block_index : USearch::Index? = nil) : Hash(String, Array(ExpandedToken))
     result = Hash(String, Array(ExpandedToken)).new
 
-    # Check which models are available and requested
-    use_line = vector_mode.line? || vector_mode.all?
-    use_block = vector_mode.block? || vector_mode.all?
-    # For on-the-fly, check co-occurrence data; otherwise check pre-computed neighbors
-    has_line = use_line && (on_the_fly ? model_has_cooccurrence?(db, Vectors::Cooccurrence::MODEL_LINE) : model_trained?(db, Vectors::Cooccurrence::MODEL_LINE))
-    has_block = use_block && (on_the_fly ? model_has_cooccurrence?(db, Vectors::Cooccurrence::MODEL_SCOPE) : model_trained?(db, Vectors::Cooccurrence::MODEL_SCOPE))
-    has_vectors = has_line || has_block
+    # Determine which indexes to use based on vector_mode
+    use_line = (vector_mode.line? || vector_mode.all?) && token_line_index
+    use_block = (vector_mode.block? || vector_mode.all?) && token_block_index
+    has_vectors = use_line || use_block
 
     query_tokens.each do |token|
       expansions = [] of ExpandedToken
@@ -80,10 +75,12 @@ module Xerp::Query::Expansion
           kind: kind
         )
 
-        # Add semantic neighbors from requested models
+        # Add semantic neighbors from USearch indexes
         if has_vectors
-          neighbors = get_neighbors(db, token_row.id, top_k, min_similarity,
-                                    weights, max_df_percent, has_line, has_block, on_the_fly)
+          neighbors = get_neighbors_usearch(db, token_row.id, top_k, min_similarity,
+                                            weights, max_df_percent,
+                                            use_line ? token_line_index : nil,
+                                            use_block ? token_block_index : nil)
           neighbors.each do |neighbor|
             expansions << ExpandedToken.new(
               original: token,
@@ -111,10 +108,11 @@ module Xerp::Query::Expansion
 
             # Add semantic neighbors for lowercase match
             if has_vectors
-              neighbors = get_neighbors(db, lower_row.id, top_k, min_similarity,
-                                        weights, max_df_percent, has_line, has_block, on_the_fly)
+              neighbors = get_neighbors_usearch(db, lower_row.id, top_k, min_similarity,
+                                                weights, max_df_percent,
+                                                use_line ? token_line_index : nil,
+                                                use_block ? token_block_index : nil)
               neighbors.each do |neighbor|
-                # Adjust score to account for case mismatch penalty
                 expansions << ExpandedToken.new(
                   original: token,
                   expanded: neighbor[:token],
@@ -146,6 +144,89 @@ module Xerp::Query::Expansion
     result
   end
 
+  # Gets neighbors using USearch indexes.
+  private def self.get_neighbors_usearch(db : DB::Database, token_id : Int64,
+                                          top_k : Int32, min_similarity : Float64,
+                                          weights : BlendWeights,
+                                          max_df_percent : Float64,
+                                          line_index : USearch::Index?,
+                                          block_index : USearch::Index?) : Array(NamedTuple(token: String, token_id: Int64, score: Float64, kind: Tokenize::TokenKind))
+    candidates_by_id = Hash(Int64, Float64).new
+
+    # Get query token's vector from each index and search
+    if line_index
+      if query_vec = line_index.get(token_id.to_u64)
+        results = line_index.search(query_vec, k: top_k * 2)
+        results.each do |r|
+          next if r.key.to_i64 == token_id  # Skip self
+          similarity = 1.0 - r.distance.to_f64
+          next if similarity < min_similarity
+          # Keep best similarity if seen from multiple indexes
+          if existing = candidates_by_id[r.key.to_i64]?
+            candidates_by_id[r.key.to_i64] = Math.max(existing, similarity)
+          else
+            candidates_by_id[r.key.to_i64] = similarity
+          end
+        end
+      end
+    end
+
+    if block_index
+      if query_vec = block_index.get(token_id.to_u64)
+        results = block_index.search(query_vec, k: top_k * 2)
+        results.each do |r|
+          next if r.key.to_i64 == token_id
+          similarity = 1.0 - r.distance.to_f64
+          next if similarity < min_similarity
+          if existing = candidates_by_id[r.key.to_i64]?
+            candidates_by_id[r.key.to_i64] = Math.max(existing, similarity)
+          else
+            candidates_by_id[r.key.to_i64] = similarity
+          end
+        end
+      end
+    end
+
+    return [] of NamedTuple(token: String, token_id: Int64, score: Float64, kind: Tokenize::TokenKind) if candidates_by_id.empty?
+
+    # Get feedback boosts
+    feedback_boosts = get_feedback_boosts(db, candidates_by_id.keys)
+
+    # Get total file count for IDF
+    total_files = Math.max(Store::Statements.file_count(db).to_f64, 1.0)
+
+    # Score and filter candidates
+    scored = [] of NamedTuple(token: String, token_id: Int64, score: Float64, kind: Tokenize::TokenKind)
+
+    candidates_by_id.each do |neighbor_id, similarity|
+      token_row = Store::Statements.select_token_by_id(db, neighbor_id)
+      next unless token_row
+
+      kind = Tokenize.kind_from_s(token_row.kind)
+      next unless KIND_ALLOWLIST.includes?(kind)
+
+      # Filter by df%
+      df_percent = (token_row.df.to_f64 / total_files) * 100.0
+      next if df_percent > max_df_percent
+
+      # Compute IDF
+      idf = Math.log((total_files + 1.0) / (token_row.df.to_f64 + 1.0)) + 1.0
+      idf_normalized = Math.min(1.0, idf / 10.0)
+
+      # Get feedback boost
+      feedback_boost = feedback_boosts[neighbor_id]? || 0.0
+
+      # Final score
+      score = weights.w_sim * similarity +
+              weights.w_idf * idf_normalized +
+              weights.w_feedback * feedback_boost
+
+      scored << {token: token_row.token, token_id: neighbor_id, score: score, kind: kind}
+    end
+
+    scored.sort_by { |n| -n[:score] }.first(top_k)
+  end
+
   # Checks if a specific model has pre-computed neighbors.
   def self.model_trained?(db : DB::Database, model : String) : Bool
     mid = Vectors::Cooccurrence.model_id(model)
@@ -153,177 +234,27 @@ module Xerp::Query::Expansion
     count > 0
   end
 
-  # Checks if a specific model has co-occurrence data (for on-the-fly computation).
+  # Checks if a specific model has co-occurrence data.
   def self.model_has_cooccurrence?(db : DB::Database, model : String) : Bool
     mid = Vectors::Cooccurrence.model_id(model)
     count = db.scalar("SELECT COUNT(*) FROM token_cooccurrence WHERE model_id = ? LIMIT 1", mid).as(Int64)
     count > 0
   end
 
-  # Gets neighbors from trained models with scoring.
-  # Reranks with: score = w1*similarity + w2*idf + w3*feedback_boost
-  # When on_the_fly=true, computes neighbors from co-occurrence matrix.
-  def self.get_neighbors(db : DB::Database, token_id : Int64,
-                         top_k : Int32, min_similarity : Float64,
-                         weights : BlendWeights,
-                         max_df_percent : Float64 = DEFAULT_MAX_DF_PERCENT,
-                         use_line : Bool = true,
-                         use_block : Bool = false,
-                         on_the_fly : Bool = false) : Array(NamedTuple(token: String, token_id: Int64, score: Float64, kind: Tokenize::TokenKind))
-    # Fetch more candidates than we need for better reranking
-    fetch_limit = top_k * 2
-
-    # Collect candidates from requested models
-    candidates_by_id = Hash(Int64, NamedTuple(token: String, token_id: Int64, similarity: Float64, kind: Tokenize::TokenKind, df: Int32)).new
-
-    if use_line
-      line_candidates = get_neighbors_for_model(db, token_id, Vectors::Cooccurrence::MODEL_LINE,
-                                                fetch_limit, min_similarity, on_the_fly)
-      line_candidates.each do |c|
-        # Keep best similarity if seen from multiple models
-        if existing = candidates_by_id[c[:token_id]]?
-          candidates_by_id[c[:token_id]] = c if c[:similarity] > existing[:similarity]
-        else
-          candidates_by_id[c[:token_id]] = c
-        end
-      end
-    end
-
-    if use_block
-      block_candidates = get_neighbors_for_model(db, token_id, Vectors::Cooccurrence::MODEL_SCOPE,
-                                                 fetch_limit, min_similarity, on_the_fly)
-      block_candidates.each do |c|
-        if existing = candidates_by_id[c[:token_id]]?
-          candidates_by_id[c[:token_id]] = c if c[:similarity] > existing[:similarity]
-        else
-          candidates_by_id[c[:token_id]] = c
-        end
-      end
-    end
-
-    candidates = candidates_by_id.values
-    return [] of NamedTuple(token: String, token_id: Int64, score: Float64, kind: Tokenize::TokenKind) if candidates.empty?
-
-    # Get feedback stats for candidates
-    feedback_boosts = get_feedback_boosts(db, candidates.map { |n| n[:token_id] })
-
-    # Compute total file count for IDF normalization
-    total_files = Math.max(Store::Statements.file_count(db).to_f64, 1.0)
-
-    # Rerank candidates
-    scored = candidates.compact_map do |n|
-      # Filter by max_df_percent (e.g., 22 = filter terms in >22% of files)
-      df_percent = (n[:df].to_f64 / total_files) * 100.0
-      next nil if df_percent > max_df_percent
-
-      # Compute IDF: ln((N+1)/(df+1)) + 1 (matches DESIGN02-00 formula)
-      idf = Math.log((total_files + 1.0) / (n[:df].to_f64 + 1.0)) + 1.0
-
-      # Normalize IDF to 0-1 range (assuming max IDF around 10)
-      idf_normalized = Math.min(1.0, idf / 10.0)
-
-      # Get feedback boost (0.0 if no feedback)
-      feedback_boost = feedback_boosts[n[:token_id]]? || 0.0
-
-      # Compute score
-      score = weights.w_line * n[:similarity] +
-              weights.w_idf * idf_normalized +
-              weights.w_feedback * feedback_boost
-
-      {token: n[:token], token_id: n[:token_id], score: score, kind: n[:kind]}
-    end
-
-    # Filter by minimum similarity and sort by score descending
-    scored.select { |n| n[:score] >= min_similarity }
-          .sort_by { |n| -n[:score] }
-          .first(top_k)
-  end
-
-  # Gets nearest neighbors for a token from a specific model.
-  # When on_the_fly=true, computes neighbors from co-occurrence matrix instead of
-  # using pre-computed token_neighbors table.
-  private def self.get_neighbors_for_model(db : DB::Database, token_id : Int64, model : String,
-                                           limit : Int32, min_similarity : Float64,
-                                           on_the_fly : Bool = false) : Array(NamedTuple(token: String, token_id: Int64, similarity: Float64, kind: Tokenize::TokenKind, df: Int32))
-    neighbors = [] of NamedTuple(token: String, token_id: Int64, similarity: Float64, kind: Tokenize::TokenKind, df: Int32)
-
-    if on_the_fly
-      # Compute neighbors on-the-fly from co-occurrence matrix
-      raw_neighbors = Vectors::Cooccurrence.compute_neighbors_on_fly(db, token_id, model, limit, min_similarity)
-
-      # Enrich with token info
-      raw_neighbors.each do |(neighbor_id, similarity)|
-        token_row = Store::Statements.select_token_by_id(db, neighbor_id)
-        next unless token_row
-
-        kind = Tokenize.kind_from_s(token_row.kind)
-        next unless KIND_ALLOWLIST.includes?(kind)
-
-        neighbors << {
-          token:      token_row.token,
-          token_id:   neighbor_id,
-          similarity: similarity,
-          kind:       kind,
-          df:         token_row.df,
-        }
-      end
-    else
-      # Use pre-computed neighbors from token_neighbors table
-      mid = Vectors::Cooccurrence.model_id(model)
-
-      # Convert min_similarity to quantized form for comparison
-      min_sim_quantized = Vectors::Cooccurrence.quantize_similarity(min_similarity)
-
-      db.query(<<-SQL, mid, token_id, min_sim_quantized, limit) do |rs|
-        SELECT t.token, t.token_id, t.kind, t.df, n.similarity
-        FROM token_neighbors n
-        JOIN tokens t ON t.token_id = n.neighbor_id
-        WHERE n.model_id = ?
-          AND n.token_id = ?
-          AND n.similarity >= ?
-          AND t.kind IN ('ident', 'word', 'compound')
-        ORDER BY n.similarity DESC
-        LIMIT ?
-      SQL
-        rs.each do
-          token = rs.read(String)
-          neighbor_id = rs.read(Int64)
-          kind_str = rs.read(String)
-          df = rs.read(Int32)
-          similarity_quantized = rs.read(Int32)
-          kind = Tokenize.kind_from_s(kind_str)
-
-          # Dequantize similarity back to 0.0-1.0 range
-          similarity = Vectors::Cooccurrence.dequantize_similarity(similarity_quantized)
-
-          neighbors << {
-            token:      token,
-            token_id:   neighbor_id,
-            similarity: similarity,
-            kind:       kind,
-            df:         df,
-          }
-        end
-      end
-    end
-
-    neighbors
-  end
-
   # Gets feedback boosts for a set of token IDs.
-  # Returns a hash of token_id => boost (0.0 to 1.0 range)
+  # Returns a hash of token_id => boost (-1.0 to 1.0 range, averaged)
   private def self.get_feedback_boosts(db : DB::Database, token_ids : Array(Int64)) : Hash(Int64, Float64)
     boosts = Hash(Int64, Float64).new
+    return boosts if token_ids.empty?
 
-    # For now, we don't have per-token feedback - feedback is on results, not tokens
-    # This is a placeholder for future enhancement where we could track
-    # which tokens appear in useful results vs not-useful results
-    # and boost tokens that correlate with positive feedback.
+    # Query token feedback scores
+    feedback = Store::Statements.select_token_feedback_bulk(db, token_ids)
 
-    # TODO: Implement token-level feedback scoring based on:
-    # - Tokens appearing in results marked "useful" get positive boost
-    # - Tokens appearing in results marked "not_useful" get negative boost
-    # - Net score normalized to 0-1 range
+    feedback.each do |token_id, (score_sum, score_count)|
+      next if score_count == 0
+      # Average the scores (already in -1.0 to 1.0 range)
+      boosts[token_id] = score_sum / score_count
+    end
 
     boosts
   end

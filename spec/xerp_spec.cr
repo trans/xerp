@@ -57,7 +57,7 @@ describe Xerp::Util do
     end
 
     it "produces deterministic result hashes" do
-      hash = Xerp::Util.hash_result("src/main.cr", 10, 20, "abc123")
+      hash = Xerp::Util.hash_result("src/main.cr", 10, 20, "abc123".to_slice)
       hash.size.should eq(64)
     end
 
@@ -98,7 +98,7 @@ describe Xerp::Store::Database do
     begin
       database = Xerp::Store::Database.new(db_path)
       database.migrate!
-      database.schema_version.should eq(8)
+      database.schema_version.should eq(13)
 
       # Verify tables exist
       database.with_connection do |db|
@@ -139,7 +139,7 @@ describe Xerp::Store::Statements do
       database.with_migrated_connection do |db|
         # Insert
         file_id = Xerp::Store::Statements.upsert_file(
-          db, "src/main.cr", "code", 1234567890_i64, 1024_i64, 50, "abc123", "2024-01-01T00:00:00Z"
+          db, "src/main.cr", "code", 1234567890_i64, 1024_i64, 50, "abc123".to_slice, "2024-01-01T00:00:00Z"
         )
         file_id.should be > 0
 
@@ -156,7 +156,7 @@ describe Xerp::Store::Statements do
 
         # Update via upsert
         Xerp::Store::Statements.upsert_file(
-          db, "src/main.cr", "code", 1234567891_i64, 2048_i64, 60, "def456", "2024-01-02T00:00:00Z"
+          db, "src/main.cr", "code", 1234567891_i64, 2048_i64, 60, "def456".to_slice, "2024-01-02T00:00:00Z"
         )
         row3 = Xerp::Store::Statements.select_file_by_path(db, "src/main.cr")
         row3.not_nil!.size.should eq(2048)

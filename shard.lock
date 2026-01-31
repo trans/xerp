@@ -16,3 +16,7 @@ shards:
     git: https://github.com/crystal-lang/crystal-sqlite3.git
     version: 0.22.0
 
+  usearch:
+    path: ../usearch.cr
+    version: 0.1.0
+

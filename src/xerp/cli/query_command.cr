@@ -84,8 +84,7 @@ module Xerp::CLI
           context_lines: context_lines,
           vector_mode: vector_mode,
           raw_vectors: no_salience,
-          semantic: semantic,
-          on_the_fly: true  # Always on-the-fly now
+          semantic: semantic
         )
 
         response = engine.run(query_text, opts)

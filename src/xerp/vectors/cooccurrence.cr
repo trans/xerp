@@ -1,3 +1,4 @@
+require "usearch"
 require "../store/statements"
 require "../tokenize/kinds"
 
@@ -6,20 +7,20 @@ module Xerp::Vectors
   #
   # Models:
   #   MODEL_LINE:  Traditional linear - sliding window over whole file in text order
-  #   MODEL_SCOPE: Scope-aware - level-based isolation (leaves swept alone, siblings co-occur)
+  #   MODEL_BLOCK: Scope-aware - level-based isolation (leaves swept alone, siblings co-occur)
   #
   # SCOPE is recommended for code - respects logical structure without crossing scope boundaries.
   # LINE is traditional word2vec-style co-occurrence (whole document, one pass).
   module Cooccurrence
     # Model identifiers (name -> id mapping)
     MODEL_LINE  = "cooc.line.v1"
-    MODEL_SCOPE = "cooc.scope.v1"
-    VALID_MODELS = [MODEL_LINE, MODEL_SCOPE]
+    MODEL_BLOCK = "cooc.block.v1"
+    VALID_MODELS = [MODEL_LINE, MODEL_BLOCK]
 
     # Model name to ID mapping (matches models table)
     MODEL_IDS = {
       MODEL_LINE  => 1,
-      MODEL_SCOPE => 3,
+      MODEL_BLOCK => 3,
     }
 
     # Similarity quantization scale (16-bit precision)
@@ -27,9 +28,7 @@ module Xerp::Vectors
 
     # Dense vector configuration (random projection via feature hashing)
     DENSE_DIMS       = 256                # Fixed dimensionality
-    DENSE_BYTES      = DENSE_DIMS * 2     # 512 bytes per vector (int16)
     HASH_SEED        = 0x5DEECE66D_u64    # Fixed seed for reproducible hashing
-    INT16_SCALE      = 32767.0            # Scale for int16 quantization
 
     # Centroid salience configuration
     DEFAULT_SALIENCE_PERCENT = 0.30  # Use top 30% of tokens by IDF
@@ -96,47 +95,6 @@ module Xerp::Vectors
       vec.map { |v| v / norm }
     end
 
-    # Quantizes normalized vector (-1.0 to 1.0) to int16 blob.
-    def self.quantize_to_blob(vec : Array(Float64)) : Bytes
-      blob = Bytes.new(DENSE_BYTES)
-      vec.each_with_index do |v, i|
-        # Clamp to [-1, 1] and scale to int16 range
-        clamped = v.clamp(-1.0, 1.0)
-        quantized = (clamped * INT16_SCALE).round.to_i16
-        # Store as little-endian
-        blob[i * 2] = (quantized & 0xFF).to_u8
-        blob[i * 2 + 1] = ((quantized >> 8) & 0xFF).to_u8
-      end
-      blob
-    end
-
-    # Dequantizes int16 blob back to float64 vector.
-    def self.dequantize_blob(blob : Bytes) : Array(Float64)
-      vec = Array(Float64).new(DENSE_DIMS, 0.0)
-      DENSE_DIMS.times do |i|
-        lo = blob[i * 2].to_i16
-        hi = blob[i * 2 + 1].to_i16
-        quantized = lo | (hi << 8)
-        vec[i] = quantized.to_f64 / INT16_SCALE
-      end
-      vec
-    end
-
-    # Computes cosine similarity between two dense vectors.
-    def self.cosine_similarity(a : Array(Float64), b : Array(Float64)) : Float64
-      dot = 0.0
-      norm_a = 0.0
-      norm_b = 0.0
-      DENSE_DIMS.times do |i|
-        dot += a[i] * b[i]
-        norm_a += a[i] * a[i]
-        norm_b += b[i] * b[i]
-      end
-      denom = Math.sqrt(norm_a) * Math.sqrt(norm_b)
-      return 0.0 if denom == 0.0
-      dot / denom
-    end
-
     # Default training parameters
     DEFAULT_WINDOW_SIZE  =  5  # ±N tokens
     DEFAULT_MIN_COUNT    =  3  # Minimum total occurrences to include
@@ -155,7 +113,7 @@ module Xerp::Vectors
 
     # Builds co-occurrence counts from all indexed files for a specific model.
     # MODEL_LINE: sliding window co-occurrence (textual proximity)
-    # MODEL_SCOPE: level-based isolation (structural siblings)
+    # MODEL_BLOCK: level-based isolation (structural siblings)
     def self.build_counts(db : DB::Database,
                           model : String,
                           window_size : Int32 = DEFAULT_WINDOW_SIZE) : Int64
@@ -189,7 +147,7 @@ module Xerp::Vectors
       if model == MODEL_LINE
         # Linear model: traditional whole-document sliding window
         pairs_count += count_linear_pairs(db, model, postings, window_size)
-      elsif model == MODEL_SCOPE
+      elsif model == MODEL_BLOCK
         # Scope model: level-based isolation (leaves swept alone, siblings co-occur)
         pairs_count += count_scope_pairs(db, model, file_id, blocks, postings, window_size)
       end
@@ -720,17 +678,61 @@ module Xerp::Vectors
 
     # --- Block Centroids ---
 
+    # Builds USearch index for token vectors.
+    # Projects each token's sparse co-occurrence vector to dense 256-dim.
+    # Returns count of tokens indexed.
+    def self.build_token_index(db : DB::Database, model : String, index : USearch::Index,
+                               min_count : Int32 = DEFAULT_MIN_COUNT) : Int64
+      mid = model_id(model)
+
+      # Load all token vectors and compute totals for filtering
+      vectors = Hash(Int64, Hash(Int64, Int64)).new
+      totals = Hash(Int64, Int64).new(0_i64)
+
+      db.query("SELECT token_id, context_id, count FROM token_cooccurrence WHERE model_id = ?", mid) do |rs|
+        rs.each do
+          token_id = rs.read(Int64)
+          context_id = rs.read(Int64)
+          count = rs.read(Int64)
+
+          vectors[token_id] ||= Hash(Int64, Int64).new
+          vectors[token_id][context_id] = count
+          totals[token_id] += count
+        end
+      end
+
+      return 0_i64 if vectors.empty?
+
+      # Get valid token kinds
+      valid_tokens = Set(Int64).new
+      db.query("SELECT token_id FROM tokens WHERE kind IN ('ident', 'word', 'compound')") do |rs|
+        rs.each { valid_tokens << rs.read(Int64) }
+      end
+
+      # Filter and project to dense
+      eligible = vectors.select { |tid, _| totals[tid] >= min_count && valid_tokens.includes?(tid) }
+      return 0_i64 if eligible.empty?
+
+      index.reserve(eligible.size)
+
+      eligible.each do |token_id, sparse_vec|
+        dense = project_to_dense(sparse_vec)
+        normalized = normalize_vector(dense)
+        vec_f32 = normalized.map(&.to_f32)
+        index.add(token_id.to_u64, vec_f32)
+      end
+
+      eligible.size.to_i64
+    end
+
     # Computes hierarchical block centroids for a model.
     # Leaf blocks: IDF-weighted average of token vectors
     # Parent blocks: average of children's centroids
-    # Stores as dense 256-dim int16 vectors (512 bytes each).
-    def self.compute_block_centroids(db : DB::Database, model : String) : Int64
+    # Writes directly to USearch index (f32 vectors, USearch stores as f16).
+    def self.compute_block_centroids(db : DB::Database, model : String, index : USearch::Index) : Int64
       mid = model_id(model)
       total_files = Store::Statements.file_count(db).to_f64
       return 0_i64 if total_files == 0
-
-      # Clear existing dense centroids for this model
-      db.exec("DELETE FROM block_centroid_dense WHERE model_id = ?", mid)
 
       # Load all token vectors for this model (context_id -> count per token)
       token_vectors = load_all_token_vectors(db, model)
@@ -752,17 +754,16 @@ module Xerp::Vectors
 
       return 0_i64 if all_dense.empty?
 
-      # Batch insert dense vectors
-      db.exec("BEGIN TRANSACTION")
+      # Reserve space in index
+      index.reserve(all_dense.size)
+
+      # Add vectors to USearch index
       all_dense.each do |block_id, dense_vec|
         normalized = normalize_vector(dense_vec)
-        blob = quantize_to_blob(normalized)
-        db.exec(<<-SQL, block_id, mid, blob)
-          INSERT INTO block_centroid_dense (block_id, model_id, vector)
-          VALUES (?, ?, ?)
-        SQL
+        # Convert to f32 for USearch
+        vec_f32 = normalized.map(&.to_f32)
+        index.add(block_id.to_u64, vec_f32)
       end
-      db.exec("COMMIT")
 
       all_dense.size.to_i64
     end

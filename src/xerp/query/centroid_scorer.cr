@@ -1,15 +1,21 @@
 require "../store/statements"
 require "../vectors/cooccurrence"
+require "../vectors/ann_index"
 
 module Xerp::Query
   # Scores blocks by centroid similarity - compares query centroid to block centroids.
   module CentroidScorer
-    # Scores blocks by comparing query centroid to pre-computed dense block centroids.
+    # Scores blocks by comparing query centroid to block centroids via USearch ANN.
     # Returns Array of {block_id, similarity} sorted by similarity descending.
+    #
+    # Requires ann_index - returns empty if nil.
     def self.score_blocks(db : DB::Database,
                           query_tokens : Array(String),
-                          model : String = Vectors::Cooccurrence::MODEL_SCOPE,
-                          top_k : Int32 = 100) : Array({Int64, Float64})
+                          model : String = Vectors::Cooccurrence::MODEL_BLOCK,
+                          top_k : Int32 = 100,
+                          ann_index : USearch::Index? = nil) : Array({Int64, Float64})
+      return [] of {Int64, Float64} unless ann_index
+
       model_id = Vectors::Cooccurrence.model_id(model)
 
       # Get query token IDs
@@ -34,11 +40,8 @@ module Xerp::Query
       query_dense = Vectors::Cooccurrence.project_to_dense(sparse_centroid)
       query_dense = Vectors::Cooccurrence.normalize_vector(query_dense)
 
-      # Score all blocks with dense vectors
-      block_scores = compute_dense_similarities(db, model_id, query_dense)
-
-      # Sort by similarity
-      sorted = block_scores.to_a.sort_by { |(_, sim)| -sim }
+      # Fast ANN search
+      sorted = Vectors::AnnIndex.search(ann_index, query_dense, top_k * 2)
 
       # Deduplicate ancestor-descendant pairs before taking top K
       deduped = deduplicate_ancestry(db, sorted)
@@ -73,12 +76,10 @@ module Xerp::Query
             # Found an ancestor in results - keep higher-scoring one
             if ancestor_score > score
               # Ancestor wins - remove this child and stop walking
-              # (if we have A > B > C and A scores highest, remove B and C)
               to_remove << block_id
               break
             else
               # Child wins (or tie) - remove ancestor, continue walking
-              # to find more ancestors to remove
               to_remove << current
             end
           end
@@ -90,17 +91,13 @@ module Xerp::Query
     end
 
     # Loads parent_block_id for given blocks and their full ancestry chains.
-    # We need to walk all the way up to find ancestors in results, even if
-    # intermediate blocks aren't in the result set.
     private def self.load_parent_map(db : DB::Database,
                                      block_ids : Array(Int64)) : Hash(Int64, Int64)
       parents = Hash(Int64, Int64).new
       return parents if block_ids.empty?
 
-      # Start with result blocks
       to_load = block_ids.to_set
 
-      # Iteratively load parents until we've loaded all ancestry chains
       while !to_load.empty?
         ids_str = to_load.join(",")
         new_parents = Set(Int64).new
@@ -111,7 +108,6 @@ module Xerp::Query
             parent_id = rs.read(Int64)
             parents[block_id] = parent_id
 
-            # If we haven't loaded this parent yet, add it to next round
             unless parents.has_key?(parent_id)
               new_parents << parent_id
             end
@@ -161,35 +157,8 @@ module Xerp::Query
 
       return centroid if count == 0
 
-      # Average
       centroid.transform_values! { |v| v / count }
       centroid
-    end
-
-    # Computes cosine similarity between query dense vector and all block dense vectors.
-    private def self.compute_dense_similarities(db : DB::Database,
-                                                model_id : Int32,
-                                                query_dense : Array(Float64)) : Hash(Int64, Float64)
-      similarities = Hash(Int64, Float64).new
-
-      # Load all block dense vectors for this model
-      db.query("SELECT block_id, vector FROM block_centroid_dense WHERE model_id = ?", model_id) do |rs|
-        rs.each do
-          block_id = rs.read(Int64)
-          blob = rs.read(Bytes)
-          block_dense = Vectors::Cooccurrence.dequantize_blob(blob)
-
-          # Compute dot product (both vectors are unit length)
-          sim = 0.0
-          Vectors::Cooccurrence::DENSE_DIMS.times do |i|
-            sim += query_dense[i] * block_dense[i]
-          end
-
-          similarities[block_id] = sim if sim > 0.0
-        end
-      end
-
-      similarities
     end
   end
 end

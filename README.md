@@ -1,8 +1,8 @@
 # xerp
 
-Intent-first code search. Find code by describing what it does, not just matching keywords.
+Scope-aware grep with intelligent ranking.
 
-xerp indexes your codebase into semantic blocks (functions, classes, sections) and lets you search with natural queries. Results show the full context hierarchy so you understand where code lives.
+xerp indexes your codebase into hierarchical blocks (functions, classes, sections) based on indentation and lets you search with TF-IDF ranked results. Optional vector augmentation provides a conceptual nudge without hiding lexical behavior. Results show the full context hierarchy so you understand where code lives.
 
 ## Installation
 
@@ -69,10 +69,11 @@ Results show the ancestry chain with line numbers and original indentation, so y
 ```
 xerp query "QUERY" [OPTIONS]
 
-Mode flags:
-  -l, --line           Line mode (textual proximity)
-  -b, --block          Block mode (structural siblings)
-  -a, --augment        Augment query with similar terms (requires training)
+Vector mode flags:
+  -l, --line           Use LINE vectors only (textual proximity)
+  -b, --block          Use BLOCK vectors only (structural siblings)
+  (default: both)      Uses both LINE and BLOCK vectors
+  -a, --augment        Enable vector augmentation (requires training)
   -n, --no-salience    Disable TF-IDF weighting (raw similarity)
 
 Output options:
@@ -91,16 +92,16 @@ Output options:
 
 Common patterns:
 ```sh
-xerp query "retry"           # default: both modes, TF-IDF salience
-xerp query -l "retry"        # line mode only
-xerp query -b "retry"        # block mode only
-xerp query -a "retry"        # augment with similar terms
-xerp query -a -n "retry"     # semantic search (augment, no salience)
+xerp query "retry"           # default: TF-IDF salience ranking
+xerp query -a "retry"        # salience + vector augmentation
+xerp query -a -l "retry"     # augment using LINE vectors only
+xerp query -a -b "retry"     # augment using BLOCK vectors only
+xerp query -a -n "retry"     # vector-only ranking (no salience)
 ```
 
-### Semantic vectors
+### Vector training
 
-Train token co-occurrence vectors for richer term discovery:
+Train token co-occurrence vectors for query expansion and augmentation:
 
 ```sh
 xerp index --train         # index and train in one step
@@ -109,9 +110,11 @@ xerp train --model line     # train only the line model
 xerp train --model block    # train only the block model
 ```
 
-Two models are trained:
-- **line** - textual proximity (tokens that appear near each other)
-- **block** - structural siblings (methods in same class, classes in same file)
+Two co-occurrence models are trained:
+- **line** - textual proximity (tokens that appear near each other in text)
+- **block** - structural siblings (tokens in same scope level)
+
+Training builds USearch HNSW indexes for fast approximate nearest neighbor lookup.
 
 ### Find related terms
 
@@ -234,19 +237,26 @@ query:
 
 1. **Indexing** - Files are parsed into hierarchical blocks based on indentation (code) or headings (markdown). Tokens are extracted and stored with their locations.
 
-2. **Querying** - Your query is tokenized and matched against the index. Blocks are scored by token frequency, weighted by token rarity (TF-IDF style).
+2. **Querying** - Your query is tokenized and matched against the index. Blocks are scored by TF-IDF salience (term frequency weighted by rarity).
 
 3. **Vector training** - Two co-occurrence models capture different relationships:
    - *Line model*: Sliding window over tokens captures textual proximity
    - *Block model*: Level-based isolation captures structural relationships (siblings co-occur, leaves stay isolated)
 
-4. **Term discovery** - Query expansion uses trained vectors to find semantically related terms, improving recall.
+   Vectors are projected to 256-dim dense space and indexed with USearch (HNSW) for fast nearest neighbor lookup.
 
-5. **Results** - Matching blocks are returned with snippets showing hit context. The ancestry chain shows the full path from file root to the matched block.
+4. **Query expansion** - When augmentation is enabled, similar tokens are found via USearch and added to the query with similarity weights.
+
+5. **Vector augmentation** - Block centroids (aggregate token vectors) are compared to query vectors, providing a small reranking nudge without overriding lexical evidence.
+
+6. **Results** - Matching blocks are returned with snippets showing hit context. The ancestry chain shows the full path from file root to the matched block.
 
 ## Files
 
-- `.cache/xerp.db` - SQLite database with index and vectors
+- `.cache/xerp.db` - SQLite database (index, tokens, co-occurrence counts)
+- `.cache/xerp.token.line.usearch` - Token vector index (LINE model)
+- `.cache/xerp.token.block.usearch` - Token vector index (BLOCK model)
+- `.cache/xerp.centroid.block.usearch` - Block centroid index
 - `.config/xerp.yaml` - Optional configuration file
 
 ## Documentation
