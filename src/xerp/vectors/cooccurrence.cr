@@ -1,6 +1,7 @@
 require "usearch"
 require "../store/statements"
 require "../tokenize/kinds"
+require "../index/blocks_builder"
 
 module Xerp::Vectors
   # Builds token co-occurrence counts from the indexed corpus.
@@ -189,10 +190,9 @@ module Xerp::Vectors
       pairs
     end
 
-    # Counts scope-based co-occurrences using level isolation.
-    # - Leaf blocks: sweep their content in isolation
-    # - Non-leaf blocks: sweep headers of direct children together (siblings co-occur)
-    # - File-level: sweep headers of top-level blocks together
+    # Counts scope-based co-occurrences using the block_line_map.
+    # Each line belongs to exactly one block (its innermost/direct block).
+    # Siblings (blocks with the same parent) are swept together.
     private def self.count_scope_pairs(db : DB::Database,
                                        model : String,
                                        file_id : Int64,
@@ -201,56 +201,46 @@ module Xerp::Vectors
                                        window_size : Int32) : Int64
       return 0_i64 if blocks.empty?
 
+      # Load block_line_map: line index (0-based) -> block_id
+      line_map_blob = Store::Statements.select_block_line_map(db, file_id)
+      return 0_i64 unless line_map_blob
+      line_to_block = Index::BlocksBuilder.decode_line_map(line_map_blob)
+
       # Group postings by line number
       postings_by_line = group_postings_by_line(postings)
 
-      # Build block lookup and parent-children map
-      block_by_id = Hash(Int64, FileBlockWithParent).new
-      children_by_parent = Hash(Int64?, Array(FileBlockWithParent)).new { |h, k| h[k] = [] of FileBlockWithParent }
+      # Build block_id -> set of direct line numbers (1-indexed)
+      lines_by_block = Hash(Int64, Array(Int32)).new { |h, k| h[k] = [] of Int32 }
+      line_to_block.each_with_index do |block_id, line_idx|
+        lines_by_block[block_id] << (line_idx + 1)  # Convert to 1-indexed
+      end
 
+      # Build parent -> children map
+      children_by_parent = Hash(Int64?, Array(Int64)).new { |h, k| h[k] = [] of Int64 }
       blocks.each do |block|
-        block_by_id[block.block_id] = block
-        children_by_parent[block.parent_block_id] << block
+        children_by_parent[block.parent_block_id] << block.block_id
       end
 
       # Accumulate all counts in memory
       counts = Hash({Int64, Int64}, Float64).new(0.0)
 
-      # Process each block
-      blocks.each do |block|
-        children = children_by_parent[block.block_id]?
+      # For each parent, sweep all children's direct lines together (siblings co-occur)
+      children_by_parent.each do |parent_id, child_ids|
+        next if child_ids.size < 1
 
-        if children.nil? || children.empty?
-          # Leaf block: sweep all content
-          leaf_tokens = [] of Int64
-          (block.start_line..block.end_line).each do |line_num|
+        # Collect tokens from all lines that belong directly to these sibling blocks
+        sibling_tokens = [] of Int64
+        child_ids.each do |child_id|
+          lines = lines_by_block[child_id]?
+          next unless lines
+          lines.each do |line_num|
             if line_tokens = postings_by_line[line_num]?
-              leaf_tokens.concat(line_tokens)
+              sibling_tokens.concat(line_tokens)
             end
           end
-          count_window_pairs_weighted(leaf_tokens, window_size, 1.0, counts) unless leaf_tokens.empty?
-        else
-          # Non-leaf: sweep headers of direct children together
-          sibling_tokens = [] of Int64
-          children.each do |child|
-            if header_tokens = postings_by_line[child.start_line]?
-              sibling_tokens.concat(header_tokens)
-            end
-          end
-          count_window_pairs_weighted(sibling_tokens, window_size, 1.0, counts) unless sibling_tokens.empty?
         end
-      end
 
-      # File-level: sweep headers of top-level blocks (parent_id = nil)
-      top_level = children_by_parent[nil]?
-      if top_level && top_level.size > 1
-        file_level_tokens = [] of Int64
-        top_level.each do |block|
-          if header_tokens = postings_by_line[block.start_line]?
-            file_level_tokens.concat(header_tokens)
-          end
-        end
-        count_window_pairs_weighted(file_level_tokens, window_size, 1.0, counts) unless file_level_tokens.empty?
+        count_window_pairs_weighted(sibling_tokens, window_size, 1.0, counts) unless sibling_tokens.empty?
       end
 
       # Upsert all counts to database

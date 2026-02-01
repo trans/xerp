@@ -571,6 +571,100 @@ describe Xerp::Query::Engine do
   end
 end
 
+describe Xerp::Adapters::IndentAdapter do
+  it "uses learned header keywords to split blocks" do
+    # Simulate learned keywords (like from xerp keywords)
+    header_keywords = {"mydef" => 0.15}  # 15% ratio
+    footer_keywords = {"myend" => 0.10}
+    keyword_context = Xerp::Adapters::KeywordContext.new(header_keywords, footer_keywords)
+
+    lines = [
+      "module Foo",
+      "  # comment line 1",
+      "  # comment line 2",
+      "  mydef bar",      # learned header keyword should split here
+      "    body",
+      "  myend",
+      "end",
+    ]
+
+    adapter = Xerp::Adapters::IndentAdapter.new(tab_width: 2, keyword_context: keyword_context)
+    result = adapter.build_blocks(lines)
+
+    # Should have multiple blocks at level 1 (comment block and mydef block)
+    level1_blocks = result.blocks.select { |b| b.level == 1 }
+    level1_blocks.size.should be >= 2
+
+    # The comment lines should be in a different block than mydef
+    comment_block_idx = result.block_idx_by_line[1]  # line 2 (0-indexed: 1)
+    mydef_block_idx = result.block_idx_by_line[3]    # line 4 (0-indexed: 3)
+    comment_block_idx.should_not eq(mydef_block_idx)
+  end
+
+  it "groups non-header lines into same block" do
+    lines = [
+      "module Foo",
+      "  @annotation",     # not a header keyword
+      "  still_same",      # should be in same block as @annotation
+      "end",
+    ]
+
+    adapter = Xerp::Adapters::IndentAdapter.new(tab_width: 2)
+    result = adapter.build_blocks(lines)
+
+    # @annotation and still_same should be in the same block
+    annotation_idx = result.block_idx_by_line[1]
+    still_same_idx = result.block_idx_by_line[2]
+    annotation_idx.should eq(still_same_idx)
+  end
+end
+
+describe Xerp::Vectors::Cooccurrence do
+  it "sweeps sibling blocks together using block_line_map" do
+    test_dir = "/tmp/xerp_cooc_test_#{Random::Secure.hex(4)}"
+    Dir.mkdir_p(test_dir)
+
+    begin
+      # Create file with clear block structure
+      File.write("#{test_dir}/test.cr", <<-CODE
+      module Foo
+        # comment block
+        # continues here
+        def bar
+          nested_body
+        end
+      end
+      CODE
+      )
+
+      # Index the file
+      config = Xerp::Config.new(test_dir)
+      indexer = Xerp::Index::Indexer.new(config)
+      indexer.index_all
+
+      # Verify block_line_map exists
+      database = Xerp::Store::Database.new(config.db_path)
+      database.with_connection do |db|
+        file_row = Xerp::Store::Statements.select_file_by_path(db, "test.cr")
+        file_row.should_not be_nil
+
+        map_blob = Xerp::Store::Statements.select_block_line_map(db, file_row.not_nil!.id)
+        map_blob.should_not be_nil
+
+        line_map = Xerp::Index::BlocksBuilder.decode_line_map(map_blob.not_nil!)
+        line_map.size.should eq(7)  # 7 lines in the file
+
+        # Comment lines (2,3) should be in same block
+        # But different from def bar (4)
+        blocks = Xerp::Store::Statements.select_blocks_by_file(db, file_row.not_nil!.id)
+        blocks.size.should be >= 2
+      end
+    ensure
+      FileUtils.rm_rf(test_dir)
+    end
+  end
+end
+
 describe Xerp::Index::BlocksBuilder do
   it "computes token counts per block" do
     test_dir = "/tmp/xerp_token_count_#{Random::Secure.hex(4)}"
