@@ -48,9 +48,11 @@ Metric: count of indent transitions per N lines, or variance of indent levels.
 
 | Kind | Pattern |
 |------|---------|
-| Prose | Variable (sentences vary widely) |
+| Prose | By sentence: variable. By line: may be consistent (80-char wrap convention) |
 | Code | More uniform (statements similar length) |
 | Comments | Often wrapped at consistent width |
+
+Note: Line length alone is weak signal - many writers follow 80-char rule for prose too.
 
 ### First-Token Patterns
 
@@ -100,7 +102,16 @@ The corpus teaches us the markers, we don't hardcode them.
 
 Harder. Possible approaches:
 
-1. **Bracket matching**: Detect punctuation-opens, different-punctuation-closes pattern
+1. **Mirror-symmetric markers**: Block comment delimiters tend to be mirror-symmetric:
+   - `/* */`
+   - `(* *)`
+   - `{- -}`
+   - `<!-- -->`
+   - `""" """`
+
+   Detect: punctuation sequence, then its mirror/reverse closes the block.
+
+2. **Bracket matching**: Detect punctuation-opens, different-punctuation-closes pattern
    - Line starts with `/*` or `/**`
    - Later line ends with `*/`
    - Everything between is one block
@@ -190,3 +201,44 @@ For each line or block region, compute:
 4. **Threshold tuning?** What symbol_ratio distinguishes code from prose? Needs empirical data.
 
 5. **Incremental vs batch?** Detect kinds during indexing, or as a post-pass?
+
+---
+
+## Layered Architecture
+
+Rather than ML (even SLMs are large compared to sharp heuristics), use a layered approach:
+
+### Layer 1: Sharp Heuristics
+
+Core detection via statistics:
+- Symbol density
+- Branching density
+- Learned patterns from corpus (comment markers, keywords)
+
+Works on any file, no configuration needed.
+
+### Layer 2: General Adapters
+
+Not per-language, but per-*family*. Maybe 2-3 total:
+
+| Adapter | Covers |
+|---------|--------|
+| Lightweight markup | Markdown, AsciiDoc, reStructuredText, Org-mode... |
+| Algol-style | Python, Ruby, Crystal, JavaScript, Go, Rust, C, Java, etc. |
+| Lisp-style (maybe) | Lisp, Scheme, Clojure (paren-based structure) |
+
+One algol adapter covers dozens of languages because they share structural bones.
+
+### Layer 3: Heuristics Select Adapter
+
+The heuristics themselves detect which adapter applies:
+- High paren density + low brace density → Lisp-style
+- Heading markers (`#`, `##`) + low symbol density → Lightweight markup
+- Keywords + braces/indent → Algol-style
+
+### Benefits
+
+- **Tiny**: No model weights, no inference
+- **Fast**: Instant detection
+- **Explainable**: Can show why a block was classified
+- **Extensible**: Add adapters without retraining
