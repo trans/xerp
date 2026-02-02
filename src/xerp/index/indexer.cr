@@ -5,6 +5,7 @@ require "../adapters/classify"
 require "../adapters/keyword_context"
 require "../tokenize/tokenizer"
 require "../tokenize/compound"
+require "../salience/salience"
 require "../util/time"
 require "./file_scanner"
 require "./blocks_builder"
@@ -164,11 +165,20 @@ module Xerp::Index
       # Store blocks
       block_ids = BlocksBuilder.build(db, file_id, block_result, file.lines)
 
-      # Compute and store token counts per block (for salience scoring)
+      # Compute and store token counts per block (legacy, for backward compat)
       BlocksBuilder.update_token_counts(
         db,
         block_result.block_idx_by_line,
         tokenize_result.tokens_by_line,
+        block_ids
+      )
+
+      # Compute and store block stats (salience counts by kind)
+      Salience::Counts.build_and_store(
+        db,
+        block_result.block_idx_by_line,
+        tokenize_result.tokens_by_line,
+        file.lines,
         block_ids
       )
 

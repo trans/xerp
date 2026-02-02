@@ -42,6 +42,12 @@ module Xerp::Tokenize
     STRING_DQ_PATTERN = /"(?:[^"\\]|\\.)*"/
     STRING_SQ_PATTERN = /'(?:[^'\\]|\\.)*'/
 
+    # Symbol/operator pattern - sequences of punctuation characters
+    # Captures: operators (+, -, *, /, =, ==, ->, =>, etc.)
+    #           brackets  ({, }, [, ], (, ))
+    #           punctuation (., ,, ;, :, etc.)
+    SYMBOL_PATTERN = /[!@#$%^&*()\-+=\[\]{}|\\:;<>,.?\/~`]+/
+
     # Comment patterns
     LINE_COMMENT_PATTERNS = [
       /(?:#|\/\/)(.*)$/,  # Ruby/Python/Crystal/JS style
@@ -97,6 +103,7 @@ module Xerp::Tokenize
         extract_identifiers(code_part, line_num, line_tokens, token_lines)
         extract_numbers(code_part, line_num, line_tokens, token_lines)
         extract_strings(code_part, line_num, line_tokens, token_lines)
+        extract_symbols(code_part, line_num, line_tokens, token_lines)
 
         # Process comment part
         if comment_text
@@ -181,6 +188,25 @@ module Xerp::Tokenize
         raw = match[0]
         if normalized = Xerp::Tokenize.normalize_token(raw, TokenKind::Word, @max_token_len)
           add_token(normalized, TokenKind::Word, line_num, line_tokens, token_lines)
+        end
+      end
+    end
+
+    private def extract_symbols(text : String, line_num : Int32,
+                                line_tokens : Array(TokenOcc),
+                                token_lines : Hash(String, {TokenKind, Set(Int32)}))
+      text.scan(SYMBOL_PATTERN) do |match|
+        raw = match[0]
+        # Skip if it's just whitespace or empty
+        next if raw.blank?
+        # Skip quote characters (handled by string extraction)
+        next if raw == "\"" || raw == "'"
+        # Skip comment markers (handled separately)
+        next if raw == "#" || raw == "//"
+
+        # Store symbol as-is (no normalization needed)
+        if raw.size <= @max_token_len
+          add_token(raw, TokenKind::Op, line_num, line_tokens, token_lines)
         end
       end
     end

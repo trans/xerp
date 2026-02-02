@@ -1,33 +1,83 @@
-module Xerp::Adapters
-  # Classifies blocks as code, prose, comment, or config based on content heuristics.
-  module BlockClassifier
-    enum BlockKind
-      Code
-      Prose
-      Comment
-      Config
-    end
+require "./counts"
+require "./metrics"
 
-    # Common comment markers by position in line (after stripping whitespace)
+module Xerp::Salience
+  # Block kind classification.
+  enum BlockKind
+    Code
+    Prose
+    Comment
+    Config
+    Unknown
+  end
+
+  # Detects block kind using statistical heuristics.
+  # Can work from stored BlockCounts or from raw lines.
+  module KindDetector
+    # Thresholds for classification (tune empirically)
+    SYMBOL_RATIO_CODE_THRESHOLD  = 0.15  # above this = likely code
+    SYMBOL_RATIO_PROSE_THRESHOLD = 0.05  # below this = likely prose
+    COMMENT_RATIO_THRESHOLD      = 0.8   # above this = comment block
+    CONFIG_RATIO_THRESHOLD       = 0.5   # above this = config block
+
+    # Common comment markers by position in line
     COMMENT_MARKERS = {'#', '/', '*', ';', '-'}
 
     # Config key-value patterns
-    CONFIG_PATTERNS = /^[\w\-_.]+\s*[:=]/
+    CONFIG_PATTERN = /^[\w\-_.]+\s*[:=]/
 
-    # Classifies a block based on its lines.
-    def self.classify(lines : Array(String)) : BlockKind
+    # -------------------------------------------------------------------
+    # Classification from stored BlockCounts (preferred - uses indexed data)
+    # -------------------------------------------------------------------
+
+    # Classifies a block based on its pre-computed counts.
+    def self.detect(counts : BlockCounts, line_count : Int32) : BlockKind
+      return BlockKind::Unknown if counts.total_tokens == 0
+
+      sym_ratio = Metrics.symbol_ratio(counts)
+      ident_ratio = Metrics.ident_ratio(counts)
+
+      # High symbol density = code
+      if sym_ratio > SYMBOL_RATIO_CODE_THRESHOLD
+        return BlockKind::Code
+      end
+
+      # Low symbol density + low ident ratio = prose
+      if sym_ratio < SYMBOL_RATIO_PROSE_THRESHOLD && ident_ratio < 0.5
+        return BlockKind::Prose
+      end
+
+      # If mostly words with few symbols and idents, likely prose
+      word_ratio = counts.word_count.to_f64 / counts.total_tokens
+      if word_ratio > 0.7 && sym_ratio < 0.1
+        return BlockKind::Prose
+      end
+
+      # Default to code if has idents
+      if ident_ratio > 0.3
+        return BlockKind::Code
+      end
+
+      BlockKind::Unknown
+    end
+
+    # -------------------------------------------------------------------
+    # Classification from raw lines (for real-time use during indexing)
+    # -------------------------------------------------------------------
+
+    # Classifies a block based on its raw lines.
+    def self.detect_from_lines(lines : Array(String)) : BlockKind
       return BlockKind::Prose if lines.empty?
 
       stats = analyze_lines(lines)
 
       # Check for comment block first
-      if stats[:comment_ratio] > 0.8
+      if stats[:comment_ratio] > COMMENT_RATIO_THRESHOLD
         return BlockKind::Comment
       end
 
       # Check for config pattern (key: value or key=value lines)
-      # Config has high config pattern ratio and low indentation variance
-      if stats[:config_ratio] > 0.5 && stats[:indent_variance] < 4.0
+      if stats[:config_ratio] > CONFIG_RATIO_THRESHOLD && stats[:indent_variance] < 4.0
         return BlockKind::Config
       end
 
@@ -79,11 +129,11 @@ module Xerp::Adapters
         end
 
         # Check for config pattern
-        if stripped.matches?(CONFIG_PATTERNS)
+        if stripped.matches?(CONFIG_PATTERN)
           config_lines += 1
         end
 
-        # Count symbols and characters (punctuation = not alphanumeric, not whitespace)
+        # Count symbols and characters
         stripped.each_char do |c|
           total_chars += 1
           total_symbols += 1 if !c.alphanumeric? && !c.whitespace?
@@ -122,16 +172,13 @@ module Xerp::Adapters
     end
 
     # Computes a code score from 0.0 (prose) to 1.0 (code).
-    # Uses structural heuristics (keywords handled by adapter).
     private def self.compute_code_score(stats : NamedTuple) : Float64
       score = 0.0
 
       # 1. Symbol density - brackets, parens, operators (most reliable)
-      # Code typically 0.08-0.15, prose 0.02-0.05
       score += (stats[:symbol_density] * 3.0).clamp(0.0, 0.35)
 
       # 2. Indentation variance - code has nested structure
-      # Prose is typically flat or paragraph-indented uniformly
       score += (stats[:indent_variance] / 15.0).clamp(0.0, 0.30)
 
       # 3. CamelCase/PascalCase identifiers
@@ -141,7 +188,6 @@ module Xerp::Adapters
       score += (stats[:short_line_ratio] * 0.2).clamp(0.0, 0.15)
 
       # 5. Prose signals (negative)
-      # Long lines suggest prose
       if stats[:avg_line_length] > 70
         score -= 0.15
       elsif stats[:avg_line_length] > 50
