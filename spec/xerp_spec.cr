@@ -619,7 +619,7 @@ describe Xerp::Adapters::IndentAdapter do
   end
 end
 
-describe Xerp::Vectors::Cooccurrence do
+describe Xerp::Semantic::Cooccurrence do
   it "sweeps sibling blocks together using block_line_map" do
     test_dir = "/tmp/xerp_cooc_test_#{Random::Secure.hex(4)}"
     Dir.mkdir_p(test_dir)

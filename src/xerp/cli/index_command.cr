@@ -2,7 +2,7 @@ require "jargon"
 require "../config"
 require "../store/db"
 require "../index/indexer"
-require "../vectors/trainer"
+require "../semantic/trainer"
 require "./json_formatter"
 require "./human_formatter"
 require "./keywords_command"
@@ -48,7 +48,7 @@ module Xerp::CLI
             STDOUT.flush
           end
 
-          trainer = Vectors::Trainer.new(config)
+          trainer = Semantic::Trainer.new(config)
           train_stats = trainer.train
 
           if json_output

@@ -3,7 +3,7 @@ require "../store/statements"
 require "../tokenize/kinds"
 require "../index/blocks_builder"
 
-module Xerp::Vectors
+module Xerp::Semantic
   # Builds token co-occurrence counts from the indexed corpus.
   #
   # Models:

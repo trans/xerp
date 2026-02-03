@@ -4,14 +4,12 @@ require "../store/types"
 require "../tokenize/kinds"
 require "../util/varint"
 require "../index/blocks_builder"
-require "../vectors/cooccurrence"
-require "./expansion"
-require "./types"
+require "../semantic/cooccurrence"
+require "../query/expansion"
+require "../query/types"
+require "./salience"
 
-module Xerp::Query::ScopeScorer
-  # Scoring parameters (tunable)
-  ALPHA  = 0.5  # Size normalization exponent (0.5 = sqrt)
-  LAMBDA = 0.2  # Clustering score weight (max 20% boost)
+module Xerp::Salience::ScopeScorer
 
   # Clustering mode: :centroid (semantic similarity) or :concentration (hit distribution)
   enum ClusterMode
@@ -32,7 +30,7 @@ module Xerp::Query::ScopeScorer
   end
 
   # Represents a scored scope (block).
-  struct ScopeScore
+  struct Score
     getter block_id : Int64
     getter file_id : Int64
     getter score : Float64
@@ -57,18 +55,18 @@ module Xerp::Query::ScopeScorer
 
   # Scores scopes based on expanded query tokens using DESIGN02-00 algorithm.
   def self.score_scopes(db : DB::Database,
-                        expanded_tokens : Hash(String, Array(Expansion::ExpandedToken)),
-                        opts : QueryOptions,
+                        expanded_tokens : Hash(String, Array(Query::Expansion::ExpandedToken)),
+                        opts : Query::QueryOptions,
                         cluster_mode : ClusterMode = ClusterMode::Centroid,
-                        ann_index : USearch::Index? = nil) : Array(ScopeScore)
+                        ann_index : USearch::Index? = nil) : Array(Score)
     # Get corpus statistics
     total_files = Store::Statements.file_count(db).to_f64
-    return [] of ScopeScore if total_files == 0
+    return [] of Score if total_files == 0
 
     # Step 1: Collect all hits and map to leaf blocks
     # hit_info: block_id -> {file_id, token -> lines}
     hit_blocks = collect_hits(db, expanded_tokens, opts)
-    return [] of ScopeScore if hit_blocks.empty?
+    return [] of Score if hit_blocks.empty?
 
     # Step 2: Build candidate scope set (hit blocks + ancestors)
     # Also precompute IDF per query token
@@ -98,9 +96,9 @@ module Xerp::Query::ScopeScorer
                 else
                   compute_clustering(acc)
                 end
-      final_score = salience * (1.0 + LAMBDA * cluster)
+      final_score = Salience::Scorer.final_score(salience, cluster)
 
-      ScopeScore.new(
+      Score.new(
         block_id: block_id,
         file_id: acc.file_id,
         score: final_score,
@@ -129,8 +127,8 @@ module Xerp::Query::ScopeScorer
   # Collects all hits, mapping each to its leaf block.
   # Returns: block_id -> {file_id, query_token -> {expanded_token, similarity, lines}}
   private def self.collect_hits(db : DB::Database,
-                                 expanded_tokens : Hash(String, Array(Expansion::ExpandedToken)),
-                                 opts : QueryOptions) : Hash(Int64, {Int64, Hash(String, Array({String, Float64, Array(Int32)}))})
+                                 expanded_tokens : Hash(String, Array(Query::Expansion::ExpandedToken)),
+                                 opts : Query::QueryOptions) : Hash(Int64, {Int64, Hash(String, Array({String, Float64, Array(Int32)}))})
     # Result: block_id -> {file_id, query_token -> [(expanded_token, similarity, lines)]}
     hit_blocks = Hash(Int64, {Int64, Hash(String, Array({String, Float64, Array(Int32)}))}).new
 
@@ -200,7 +198,7 @@ module Xerp::Query::ScopeScorer
   #       how many files, potentially giving better locality signals.
   #       For now we use file-level df (tokens.df) per DESIGN02-00.
   private def self.compute_idf_map(db : DB::Database,
-                                    expanded_tokens : Hash(String, Array(Expansion::ExpandedToken)),
+                                    expanded_tokens : Hash(String, Array(Query::Expansion::ExpandedToken)),
                                     total_files : Float64) : Hash(String, Float64)
     idf_map = Hash(String, Float64).new(1.0)  # default IDF = 1.0
 
@@ -215,7 +213,7 @@ module Xerp::Query::ScopeScorer
 
       df = token_row.df.to_f64
       # IDF formula from DESIGN02-00: ln((N + 1) / (df + 1)) + 1
-      idf_map[query_token] = Math.log((total_files + 1.0) / (df + 1.0)) + 1.0
+      idf_map[query_token] = Salience::Scorer.idf_smooth(total_files, df)
     end
 
     idf_map
@@ -413,53 +411,26 @@ module Xerp::Query::ScopeScorer
   # TF is already weighted by similarity if not in raw_vectors mode.
   private def self.compute_salience(acc : ScopeAccumulator, idf_by_token : Hash(String, Float64)) : Float64
     # TF saturation: tfw = ln(1 + tf)
-    # Size normalization: norm = (1 + size)^alpha
     numerator = 0.0
     acc.tf_by_token.each do |query_token, tf|
-      tfw = Math.log(1.0 + tf)  # tf is already similarity-weighted
+      tfw = Salience::Scorer.tf_saturate(tf)  # tf is already similarity-weighted
       idf = idf_by_token[query_token]? || 1.0
       numerator += tfw * idf
     end
 
-    size = acc.token_count.to_f64
-    norm = (1.0 + size) ** ALPHA
-
-    numerator / norm
+    Salience::Scorer.salience(numerator, acc.token_count)
   end
 
   # Computes clustering score for a scope.
   # Based on entropy of hit distribution across immediate children.
   private def self.compute_clustering(acc : ScopeAccumulator) : Float64
-    child_counts = acc.child_hit_counts.values
-    return 0.0 if child_counts.size < 2
-
-    total = child_counts.sum.to_f64
-    return 0.0 if total < 2.0
-
-    # Compute entropy
-    entropy = 0.0
-    children_with_hits = 0
-    child_counts.each do |count|
-      next if count == 0
-      children_with_hits += 1
-      p = count.to_f64 / total
-      entropy -= p * Math.log(p)
-    end
-
-    return 0.0 if children_with_hits < 2
-
-    # Normalize: H_max = ln(number_of_children_with_hits)
-    h_max = Math.log(children_with_hits.to_f64)
-    return 0.0 if h_max <= 0.0
-
-    # cluster = 1 - (H / H_max)
-    1.0 - (entropy / h_max)
+    Salience::Scorer.clustering(acc.child_hit_counts)
   end
 
   # Computes centroid similarity between query and candidate blocks.
   # Returns block_id -> similarity (0.0 to 1.0).
   private def self.compute_centroid_similarities(db : DB::Database,
-                                                  expanded_tokens : Hash(String, Array(Expansion::ExpandedToken)),
+                                                  expanded_tokens : Hash(String, Array(Query::Expansion::ExpandedToken)),
                                                   block_ids : Array(Int64),
                                                   ann_index : USearch::Index) : Hash(Int64, Float64)
     similarities = Hash(Int64, Float64).new
@@ -470,8 +441,8 @@ module Xerp::Query::ScopeScorer
     return similarities if query_centroid.empty?
 
     # Project to dense and normalize
-    query_dense = Vectors::Cooccurrence.project_to_dense(query_centroid)
-    query_dense = Vectors::Cooccurrence.normalize_vector(query_dense)
+    query_dense = Semantic::Cooccurrence.project_to_dense(query_centroid)
+    query_dense = Semantic::Cooccurrence.normalize_vector(query_dense)
     query_f32 = query_dense.map(&.to_f32)
 
     # Retrieve block vectors from USearch and compute similarities
@@ -481,7 +452,7 @@ module Xerp::Query::ScopeScorer
 
       # Compute cosine similarity (dot product of unit vectors)
       sim = 0.0_f32
-      Vectors::Cooccurrence::DENSE_DIMS.times do |i|
+      Semantic::Cooccurrence::DENSE_DIMS.times do |i|
         sim += query_f32[i] * block_vec[i]
       end
 
@@ -493,9 +464,9 @@ module Xerp::Query::ScopeScorer
 
   # Builds a sparse query centroid from expanded tokens.
   private def self.build_query_centroid(db : DB::Database,
-                                         expanded_tokens : Hash(String, Array(Expansion::ExpandedToken))) : Hash(Int64, Float64)
+                                         expanded_tokens : Hash(String, Array(Query::Expansion::ExpandedToken))) : Hash(Int64, Float64)
     centroid = Hash(Int64, Float64).new(0.0)
-    model_id = Vectors::Cooccurrence.model_id(Vectors::Cooccurrence::MODEL_BLOCK)
+    model_id = Semantic::Cooccurrence.model_id(Semantic::Cooccurrence::MODEL_BLOCK)
 
     # Collect token IDs from expanded tokens
     token_ids = Set(Int64).new

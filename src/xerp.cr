@@ -32,14 +32,13 @@ require "./xerp/index/block_sig_builder"
 require "./xerp/index/indexer"
 
 # Vectors (semantic expansion)
-require "./xerp/vectors/cooccurrence"
-require "./xerp/vectors/trainer"
+require "./xerp/semantic/cooccurrence"
+require "./xerp/semantic/trainer"
 
 # Query
 require "./xerp/query/types"
 require "./xerp/query/result_id"
 require "./xerp/query/expansion"
-require "./xerp/query/scorer"
 require "./xerp/query/snippet"
 require "./xerp/query/explain"
 require "./xerp/query/query_engine"

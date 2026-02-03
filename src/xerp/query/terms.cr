@@ -1,8 +1,8 @@
 require "../store/statements"
 require "../store/types"
 require "../util/varint"
-require "../vectors/cooccurrence"
-require "./scope_scorer"
+require "../semantic/cooccurrence"
+require "../salience/scope_scorer"
 require "./expansion"
 require "./types"
 
@@ -120,12 +120,12 @@ module Xerp::Query::Terms
     # Collect vector results
     case source.vector
     when Granularity::Line
-      result_sets << extract_from_model(db, query_tokens, opts, Vectors::Cooccurrence::MODEL_LINE, "vector:line")
+      result_sets << extract_from_model(db, query_tokens, opts, Semantic::Cooccurrence::MODEL_LINE, "vector:line")
     when Granularity::Block
-      result_sets << extract_from_model(db, query_tokens, opts, Vectors::Cooccurrence::MODEL_BLOCK, "vector:block")
+      result_sets << extract_from_model(db, query_tokens, opts, Semantic::Cooccurrence::MODEL_BLOCK, "vector:block")
     when Granularity::All
-      result_sets << extract_from_model(db, query_tokens, opts, Vectors::Cooccurrence::MODEL_LINE, "vector:line")
-      result_sets << extract_from_model(db, query_tokens, opts, Vectors::Cooccurrence::MODEL_BLOCK, "vector:block")
+      result_sets << extract_from_model(db, query_tokens, opts, Semantic::Cooccurrence::MODEL_LINE, "vector:line")
+      result_sets << extract_from_model(db, query_tokens, opts, Semantic::Cooccurrence::MODEL_BLOCK, "vector:block")
     when Granularity::Centroid
       result_sets << extract_from_centroid(db, query_tokens, opts, "vector:centroid")
     end
@@ -204,8 +204,8 @@ module Xerp::Query::Terms
     return [] of SalientTerm if total_files == 0
 
     # Check if any model is trained
-    has_line = Expansion.model_trained?(db, Vectors::Cooccurrence::MODEL_LINE)
-    has_scope = Expansion.model_trained?(db, Vectors::Cooccurrence::MODEL_BLOCK)
+    has_line = Expansion.model_trained?(db, Semantic::Cooccurrence::MODEL_LINE)
+    has_scope = Expansion.model_trained?(db, Semantic::Cooccurrence::MODEL_BLOCK)
     return [] of SalientTerm unless has_line || has_scope
 
     # Get query token IDs
@@ -378,7 +378,7 @@ module Xerp::Query::Terms
   private def self.get_neighbors_simple(db : DB::Database, token_id : Int64,
                                          model : String, limit : Int32,
                                          max_df_percent : Float64) : Array(NamedTuple(token: String, token_id: Int64, score: Float64))
-    mid = Vectors::Cooccurrence.model_id(model)
+    mid = Semantic::Cooccurrence.model_id(model)
     total_files = Math.max(Store::Statements.file_count(db).to_f64, 1.0)
 
     results = [] of NamedTuple(token: String, token_id: Int64, score: Float64)
@@ -405,7 +405,7 @@ module Xerp::Query::Terms
         next if df_percent > max_df_percent
 
         # Dequantize and use as score
-        similarity = Vectors::Cooccurrence.dequantize_similarity(similarity_quantized)
+        similarity = Semantic::Cooccurrence.dequantize_similarity(similarity_quantized)
 
         results << {token: token, token_id: neighbor_id, score: similarity}
       end
@@ -483,7 +483,7 @@ module Xerp::Query::Terms
       file_filter: opts.file_filter,
       file_type_filter: opts.file_type_filter
     )
-    scope_scores = ScopeScorer.score_scopes(db, expanded_tokens, query_opts)
+    scope_scores = Salience::ScopeScorer.score_scopes(db, expanded_tokens, query_opts)
     return [] of SalientTerm if scope_scores.empty?
 
     # Accumulate salience per token

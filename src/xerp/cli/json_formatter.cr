@@ -2,7 +2,7 @@ require "json"
 require "../query/types"
 require "../query/terms"
 require "../index/indexer"
-require "../vectors/trainer"
+require "../semantic/trainer"
 
 module Xerp::CLI::JsonFormatter
   # Formats a query response as JSON (pretty-printed).
@@ -87,7 +87,7 @@ module Xerp::CLI::JsonFormatter
   end
 
   # Formats training stats as JSON (pretty-printed) - legacy single model.
-  def self.format_train_stats(stats : Vectors::TrainStats, workspace_root : String) : String
+  def self.format_train_stats(stats : Semantic::TrainStats, workspace_root : String) : String
     JSON.build(indent: "  ") do |json|
       json.object do
         json.field "workspace", workspace_root
@@ -101,7 +101,7 @@ module Xerp::CLI::JsonFormatter
   end
 
   # Formats multi-model training stats as JSON (pretty-printed).
-  def self.format_multi_train_stats(stats : Vectors::MultiModelTrainStats, workspace_root : String) : String
+  def self.format_multi_train_stats(stats : Semantic::MultiModelTrainStats, workspace_root : String) : String
     JSON.build(indent: "  ") do |json|
       json.object do
         json.field "workspace", workspace_root

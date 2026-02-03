@@ -1,6 +1,6 @@
 require "usearch"
 
-module Xerp::Vectors
+module Xerp::Semantic
   # USearch-based approximate nearest neighbor indexes.
   # Provides fast similarity search using HNSW algorithm.
   module AnnIndex

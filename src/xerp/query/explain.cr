@@ -1,13 +1,13 @@
 require "./types"
-require "./scorer"
+require "../salience/scope_scorer"
 require "./expansion"
 
 module Xerp::Query::Explain
-  # Builds hit information for a block score.
-  def self.build_hits(block_score : Scorer::BlockScore) : Array(HitInfo)
+  # Builds hit information for a scope score.
+  def self.build_hits(scope_score : Salience::ScopeScorer::Score) : Array(HitInfo)
     hits = [] of HitInfo
 
-    block_score.token_hits.each do |token, hit|
+    scope_score.token_hits.each do |token, hit|
       hits << HitInfo.new(
         token: hit.token,
         from_query_token: hit.original_query_token,
@@ -23,11 +23,11 @@ module Xerp::Query::Explain
     hits
   end
 
-  # Collects all hit lines from a block score.
-  def self.all_hit_lines(block_score : Scorer::BlockScore) : Array(Int32)
+  # Collects all hit lines from a scope score.
+  def self.all_hit_lines(scope_score : Salience::ScopeScorer::Score) : Array(Int32)
     lines = Set(Int32).new
 
-    block_score.token_hits.each do |_, hit|
+    scope_score.token_hits.each do |_, hit|
       hit.lines.each { |l| lines << l }
     end
 

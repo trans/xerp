@@ -1,8 +1,8 @@
 require "jargon"
 require "../config"
 require "../store/db"
-require "../vectors/trainer"
-require "../vectors/cooccurrence"
+require "../semantic/trainer"
+require "../semantic/cooccurrence"
 require "./json_formatter"
 require "./human_formatter"
 require "./keywords_command"
@@ -21,8 +21,8 @@ module Xerp::CLI
 
       # Map CLI model arg to internal model name
       model = case model_arg
-              when "line"  then Vectors::Cooccurrence::MODEL_LINE
-              when "block" then Vectors::Cooccurrence::MODEL_BLOCK
+              when "line"  then Semantic::Cooccurrence::MODEL_LINE
+              when "block" then Semantic::Cooccurrence::MODEL_BLOCK
               when "all"   then nil  # Train all (line + block)
               else
                 STDERR.puts "Error: Invalid model '#{model_arg}'. Use: line, block, or all"
@@ -37,7 +37,7 @@ module Xerp::CLI
 
       begin
         config = Config.new(root)
-        trainer = Vectors::Trainer.new(config)
+        trainer = Semantic::Trainer.new(config)
 
         if clear_only
           trainer.clear(model)

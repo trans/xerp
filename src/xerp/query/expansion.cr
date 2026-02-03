@@ -1,8 +1,8 @@
 require "usearch"
 require "../store/statements"
 require "../tokenize/kinds"
-require "../vectors/cooccurrence"
-require "../vectors/ann_index"
+require "../semantic/cooccurrence"
+require "../semantic/ann_index"
 require "./types"
 
 module Xerp::Query::Expansion
@@ -229,14 +229,14 @@ module Xerp::Query::Expansion
 
   # Checks if a specific model has pre-computed neighbors.
   def self.model_trained?(db : DB::Database, model : String) : Bool
-    mid = Vectors::Cooccurrence.model_id(model)
+    mid = Semantic::Cooccurrence.model_id(model)
     count = db.scalar("SELECT COUNT(*) FROM token_neighbors WHERE model_id = ?", mid).as(Int64)
     count > 0
   end
 
   # Checks if a specific model has co-occurrence data.
   def self.model_has_cooccurrence?(db : DB::Database, model : String) : Bool
-    mid = Vectors::Cooccurrence.model_id(model)
+    mid = Semantic::Cooccurrence.model_id(model)
     count = db.scalar("SELECT COUNT(*) FROM token_cooccurrence WHERE model_id = ? LIMIT 1", mid).as(Int64)
     count > 0
   end

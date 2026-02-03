@@ -2,7 +2,7 @@ require "../query/types"
 require "../query/snippet"
 require "../query/terms"
 require "../index/indexer"
-require "../vectors/trainer"
+require "../semantic/trainer"
 
 module Xerp::CLI::HumanFormatter
   # Formats a query response for human reading.
@@ -148,7 +148,7 @@ module Xerp::CLI::HumanFormatter
   end
 
   # Formats training stats for human reading (legacy single model).
-  def self.format_train_stats(stats : Vectors::TrainStats, workspace_root : String) : String
+  def self.format_train_stats(stats : Semantic::TrainStats, workspace_root : String) : String
     result = String::Builder.new
 
     result << "Training vectors for "
@@ -174,7 +174,7 @@ module Xerp::CLI::HumanFormatter
   end
 
   # Formats multi-model training stats for human reading.
-  def self.format_multi_train_stats(stats : Vectors::MultiModelTrainStats) : String
+  def self.format_multi_train_stats(stats : Semantic::MultiModelTrainStats) : String
     result = String::Builder.new
 
     if line_stats = stats.line_stats

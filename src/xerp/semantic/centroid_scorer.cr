@@ -1,8 +1,8 @@
 require "../store/statements"
-require "../vectors/cooccurrence"
-require "../vectors/ann_index"
+require "./cooccurrence"
+require "./ann_index"
 
-module Xerp::Query
+module Xerp::Semantic
   # Scores blocks by centroid similarity - compares query centroid to block centroids.
   module CentroidScorer
     # Scores blocks by comparing query centroid to block centroids via USearch ANN.
@@ -11,12 +11,12 @@ module Xerp::Query
     # Requires ann_index - returns empty if nil.
     def self.score_blocks(db : DB::Database,
                           query_tokens : Array(String),
-                          model : String = Vectors::Cooccurrence::MODEL_BLOCK,
+                          model : String = Semantic::Cooccurrence::MODEL_BLOCK,
                           top_k : Int32 = 100,
                           ann_index : USearch::Index? = nil) : Array({Int64, Float64})
       return [] of {Int64, Float64} unless ann_index
 
-      model_id = Vectors::Cooccurrence.model_id(model)
+      model_id = Semantic::Cooccurrence.model_id(model)
 
       # Get query token IDs
       query_token_ids = Set(Int64).new
@@ -37,11 +37,11 @@ module Xerp::Query
       sparse_centroid = build_query_centroid(query_vectors)
       return [] of {Int64, Float64} if sparse_centroid.empty?
 
-      query_dense = Vectors::Cooccurrence.project_to_dense(sparse_centroid)
-      query_dense = Vectors::Cooccurrence.normalize_vector(query_dense)
+      query_dense = Semantic::Cooccurrence.project_to_dense(sparse_centroid)
+      query_dense = Semantic::Cooccurrence.normalize_vector(query_dense)
 
       # Fast ANN search
-      sorted = Vectors::AnnIndex.search(ann_index, query_dense, top_k * 2)
+      sorted = Semantic::AnnIndex.search(ann_index, query_dense, top_k * 2)
 
       # Deduplicate ancestor-descendant pairs before taking top K
       deduped = deduplicate_ancestry(db, sorted)

@@ -3,16 +3,14 @@ require "../store/db"
 require "../store/statements"
 require "../tokenize/tokenizer"
 require "../util/hash"
-require "../vectors/ann_index"
-require "../vectors/cooccurrence"
+require "../semantic/ann_index"
+require "../semantic/cooccurrence"
 require "./types"
 require "./expansion"
-require "./scorer"
-require "./scope_scorer"
-require "./centroid_scorer"
+require "../salience/scope_scorer"
+require "../semantic/centroid_scorer"
 require "./snippet"
 require "./result_id"
-require "./explain"
 
 module Xerp::Query
   # Main query engine that coordinates the query pipeline.
@@ -27,15 +25,15 @@ module Xerp::Query
     def initialize(@config : Config)
       @database = Store::Database.new(@config.db_path)
       @tokenizer = Tokenize::Tokenizer.new(@config.max_token_len)
-      @centroid_index = load_index(Vectors::AnnIndex.centroid_path(@config.cache_dir, Vectors::Cooccurrence::MODEL_BLOCK))
-      @token_line_index = load_index(Vectors::AnnIndex.token_path(@config.cache_dir, Vectors::Cooccurrence::MODEL_LINE))
-      @token_block_index = load_index(Vectors::AnnIndex.token_path(@config.cache_dir, Vectors::Cooccurrence::MODEL_BLOCK))
+      @centroid_index = load_index(Semantic::AnnIndex.centroid_path(@config.cache_dir, Semantic::Cooccurrence::MODEL_BLOCK))
+      @token_line_index = load_index(Semantic::AnnIndex.token_path(@config.cache_dir, Semantic::Cooccurrence::MODEL_LINE))
+      @token_block_index = load_index(Semantic::AnnIndex.token_path(@config.cache_dir, Semantic::Cooccurrence::MODEL_BLOCK))
     end
 
     # Loads a USearch index if it exists, returns nil otherwise.
     private def load_index(path : String) : USearch::Index?
       if File.exists?(path)
-        Vectors::AnnIndex.view_index(path)
+        Semantic::AnnIndex.view_index(path)
       else
         nil
       end
@@ -85,7 +83,7 @@ module Xerp::Query
 
         if opts.semantic
           # Semantic mode: use block centroid similarity
-          centroid_scores = CentroidScorer.score_blocks(db, query_tokens.to_a, top_k: opts.top_k, ann_index: @centroid_index)
+          centroid_scores = Semantic::CentroidScorer.score_blocks(db, query_tokens.to_a, top_k: opts.top_k, ann_index: @centroid_index)
           total_candidates = centroid_scores.size
 
           # Build results from centroid scores
@@ -99,8 +97,8 @@ module Xerp::Query
 
           # Score scopes using DESIGN02-00 algorithm
           # Use centroid similarity when augment is on, concentration otherwise
-          cluster_mode = opts.vector_mode.none? ? ScopeScorer::ClusterMode::Concentration : ScopeScorer::ClusterMode::Centroid
-          scope_scores = ScopeScorer.score_scopes(db, expanded, opts, cluster_mode, @centroid_index)
+          cluster_mode = opts.vector_mode.none? ? Salience::ScopeScorer::ClusterMode::Concentration : Salience::ScopeScorer::ClusterMode::Centroid
+          scope_scores = Salience::ScopeScorer.score_scopes(db, expanded, opts, cluster_mode, @centroid_index)
           total_candidates = scope_scores.size
 
           # Build results
@@ -125,69 +123,9 @@ module Xerp::Query
       )
     end
 
-    private def build_results(db : DB::Database,
-                              block_scores : Array(Scorer::BlockScore),
-                              expanded : Hash(String, Array(Expansion::ExpandedToken)),
-                              opts : QueryOptions) : Array(QueryResult)
-      results = [] of QueryResult
-
-      block_scores.each do |bs|
-        # Get file info
-        file_row = Store::Statements.select_file_by_id(db, bs.file_id)
-        next unless file_row
-
-        # Get block info
-        block_row = Store::Statements.select_block_by_id(db, bs.block_id)
-        next unless block_row
-
-        # Get hit lines for snippet extraction
-        hit_lines = Explain.all_hit_lines(bs)
-
-        # Extract snippet
-        snippet_result = Snippet.extract_with_error(
-          @config.workspace_root,
-          file_row.rel_path,
-          block_row,
-          hit_lines,
-          opts.max_snippet_lines,
-          opts.context_lines
-        )
-
-        # Generate stable result ID
-        result_id = ResultId.generate(file_row.rel_path, block_row, file_row.content_hash)
-
-        # Build hits if explaining
-        hits = opts.explain ? Explain.build_hits(bs) : nil
-
-        # Build ancestry chain if requested (also gives us the header)
-        ancestry = build_ancestry(db, file_row.id, block_row) if opts.ancestry
-
-        # Get header from immediate parent via line_cache
-        header_text = get_parent_header(db, file_row.id, block_row)
-
-        results << QueryResult.new(
-          result_id: result_id,
-          file_path: file_row.rel_path,
-          file_type: file_row.file_type,
-          block_id: bs.block_id,
-          line_start: block_row.line_start,
-          line_end: block_row.line_end,
-          score: bs.score,
-          snippet: snippet_result.content,
-          snippet_start: snippet_result.snippet_start,
-          header_text: header_text,
-          hits: hits,
-          warn: snippet_result.error,
-          ancestry: ancestry
-        )
-      end
-
-      results
-    end
-
     # Builds results from scope scores (DESIGN02-00).
     private def build_scope_results(db : DB::Database,
-                                     scope_scores : Array(ScopeScorer::ScopeScore),
+                                     scope_scores : Array(Salience::ScopeScorer::Score),
                                      expanded : Hash(String, Array(Expansion::ExpandedToken)),
                                      opts : QueryOptions) : Array(QueryResult)
       results = [] of QueryResult

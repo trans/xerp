@@ -5,7 +5,7 @@ require "../util/time"
 require "./cooccurrence"
 require "./ann_index"
 
-module Xerp::Vectors
+module Xerp::Semantic
   # Training statistics for a single model
   struct TrainStats
     getter model : String
