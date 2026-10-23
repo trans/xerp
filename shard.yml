@@ -16,7 +16,7 @@ dependencies:
   sqlite3:
     github: crystal-lang/crystal-sqlite3
   jargon:
-    github: trans/jargon
+    github: openbohemians/jargon.cr
   ignoreme:
     github: trans/ignoreme
   usearch:
